@@ -96,3 +96,79 @@ export async function getBrowsers() {
   const response = await api.get('/browsers')
   return response.data
 }
+
+// Dashboard Stats
+export interface DashboardStats {
+  totalScenarios: number
+  passRate: number
+  last24hRuns: number
+  failedTests: number
+  trendData: { date: string; passed: number; failed: number }[]
+}
+
+export async function getDashboardStats(): Promise<DashboardStats> {
+  // Aggregate stats from runs and scenarios
+  const [runs, scenarios] = await Promise.all([
+    getTestRuns({ limit: 100 }),
+    getScenarios(),
+  ])
+
+  const now = new Date()
+  const last24h = new Date(now.getTime() - 24 * 60 * 60 * 1000)
+  const last7Days = new Date(now.getTime() - 7 * 24 * 60 * 60 * 1000)
+
+  // Calculate stats
+  const passedRuns = runs.filter((r: { status: string }) => r.status === 'passed').length
+  const failedRuns = runs.filter((r: { status: string }) => r.status === 'failed').length
+  const passRate = runs.length > 0 ? Math.round((passedRuns / runs.length) * 100) : 0
+
+  const last24hRunsCount = runs.filter(
+    (r: { created_at: string }) => new Date(r.created_at) > last24h
+  ).length
+
+  // Build 7-day trend data
+  const trendData: { date: string; passed: number; failed: number }[] = []
+  for (let i = 6; i >= 0; i--) {
+    const date = new Date(now.getTime() - i * 24 * 60 * 60 * 1000)
+    const dateStr = date.toISOString().split('T')[0]
+    const dayStart = new Date(dateStr)
+    const dayEnd = new Date(dayStart.getTime() + 24 * 60 * 60 * 1000)
+
+    const dayRuns = runs.filter((r: { created_at: string }) => {
+      const runDate = new Date(r.created_at)
+      return runDate >= dayStart && runDate < dayEnd
+    })
+
+    trendData.push({
+      date: dateStr,
+      passed: dayRuns.filter((r: { status: string }) => r.status === 'passed').length,
+      failed: dayRuns.filter((r: { status: string }) => r.status === 'failed').length,
+    })
+  }
+
+  return {
+    totalScenarios: scenarios.length,
+    passRate,
+    last24hRuns: last24hRunsCount,
+    failedTests: failedRuns,
+    trendData,
+  }
+}
+
+// Delete Repo
+export async function deleteRepo(id: string) {
+  const response = await api.delete(`/repos/${id}`)
+  return response.data
+}
+
+// Get Repo Details
+export async function getRepoDetails(id: string) {
+  const response = await api.get(`/repos/${id}`)
+  return response.data
+}
+
+// Sync all repos
+export async function syncAllRepos() {
+  const repos = await getRepos()
+  return Promise.all(repos.map((repo: { id: string }) => syncRepo(repo.id)))
+}

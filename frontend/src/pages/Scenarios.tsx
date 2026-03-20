@@ -1,93 +1,464 @@
-import { useEffect, useState } from 'react'
+import { useEffect, useState, useMemo } from 'react'
 import { Link } from 'react-router-dom'
-import { getScenarios } from '../api/client'
+import { getScenarios, getRepos, syncRepo } from '../api/client'
 
 interface Scenario {
   id: string
   name: string
   feature_path: string
+  feature_name?: string
   tags: string[]
   repo_id?: string
+  repo_name?: string
+  description?: string
+  step_count?: number
+}
+
+interface Repo {
+  id: string
+  name: string
+  git_url: string
+  branch?: string
 }
 
 export default function Scenarios() {
   const [scenarios, setScenarios] = useState<Scenario[]>([])
+  const [repos, setRepos] = useState<Repo[]>([])
   const [loading, setLoading] = useState(true)
-  const [tagFilter, setTagFilter] = useState('')
+  const [syncing, setSyncing] = useState<string | null>(null)
+
+  // Filters
+  const [searchQuery, setSearchQuery] = useState('')
+  const [selectedTag, setSelectedTag] = useState('')
+  const [selectedRepo, setSelectedRepo] = useState('')
+
+  // View mode
+  const [viewMode, setViewMode] = useState<'list' | 'grid'>('list')
 
   useEffect(() => {
-    async function fetchScenarios() {
+    async function fetchData() {
       try {
-        const data = await getScenarios(tagFilter ? { tag: tagFilter } : undefined)
-        setScenarios(data)
+        const [scenariosData, reposData] = await Promise.all([
+          getScenarios(),
+          getRepos(),
+        ])
+        setScenarios(Array.isArray(scenariosData) ? scenariosData : scenariosData.items || [])
+        setRepos(Array.isArray(reposData) ? reposData : reposData.items || [])
       } catch (error) {
-        console.error('Failed to fetch scenarios:', error)
+        console.error('Failed to fetch data:', error)
       } finally {
         setLoading(false)
       }
     }
-    fetchScenarios()
-  }, [tagFilter])
+    fetchData()
+  }, [])
 
-  const allTags = [...new Set(scenarios.flatMap((s) => s.tags))]
+  // Extract unique tags
+  const allTags = useMemo(() => {
+    const tags = new Set<string>()
+    scenarios.forEach((s) => s.tags?.forEach((t) => tags.add(t)))
+    return Array.from(tags).sort()
+  }, [scenarios])
+
+  // Filter scenarios
+  const filteredScenarios = useMemo(() => {
+    return scenarios.filter((scenario) => {
+      // Search filter
+      if (searchQuery) {
+        const query = searchQuery.toLowerCase()
+        const matchesName = scenario.name.toLowerCase().includes(query)
+        const matchesPath = scenario.feature_path.toLowerCase().includes(query)
+        const matchesTags = scenario.tags?.some((t) => t.toLowerCase().includes(query))
+        if (!matchesName && !matchesPath && !matchesTags) return false
+      }
+
+      // Tag filter
+      if (selectedTag && !scenario.tags?.includes(selectedTag)) return false
+
+      // Repo filter
+      if (selectedRepo && scenario.repo_id !== selectedRepo) return false
+
+      return true
+    })
+  }, [scenarios, searchQuery, selectedTag, selectedRepo])
+
+  // Group scenarios by feature file
+  const groupedByFeature = useMemo(() => {
+    const groups: Record<string, Scenario[]> = {}
+    filteredScenarios.forEach((scenario) => {
+      const key = scenario.feature_path || 'Unknown'
+      if (!groups[key]) groups[key] = []
+      groups[key].push(scenario)
+    })
+    return groups
+  }, [filteredScenarios])
+
+  const handleSyncAll = async () => {
+    for (const repo of repos) {
+      await handleSyncRepo(repo.id)
+    }
+    // Refresh scenarios after sync
+    try {
+      const data = await getScenarios()
+      setScenarios(Array.isArray(data) ? data : data.items || [])
+    } catch (error) {
+      console.error('Failed to refresh scenarios:', error)
+    }
+  }
+
+  const handleSyncRepo = async (repoId: string) => {
+    setSyncing(repoId)
+    try {
+      await syncRepo(repoId)
+    } catch (error) {
+      console.error('Failed to sync repo:', error)
+    } finally {
+      setSyncing(null)
+    }
+  }
+
+  const getRepoName = (repoId?: string) => {
+    if (!repoId) return 'Unknown'
+    return repos.find((r) => r.id === repoId)?.name || repoId
+  }
+
+  const clearFilters = () => {
+    setSearchQuery('')
+    setSelectedTag('')
+    setSelectedRepo('')
+  }
+
+  const hasActiveFilters = searchQuery || selectedTag || selectedRepo
 
   return (
     <div>
+      {/* Header */}
       <div className="flex justify-between items-center mb-8">
-        <h1 className="text-3xl font-bold">Scenarios</h1>
-        <button className="btn btn-primary">Sync All</button>
+        <div>
+          <h1 className="text-3xl font-bold text-gray-100">Scenarios</h1>
+          <p className="text-gray-400 mt-1">
+            {scenarios.length} scenarios from {repos.length} repositories
+          </p>
+        </div>
+        <button
+          onClick={handleSyncAll}
+          disabled={syncing !== null || repos.length === 0}
+          className="btn btn-primary flex items-center gap-2"
+        >
+          <svg
+            className={`w-5 h-5 ${syncing ? 'animate-spin' : ''}`}
+            fill="none"
+            stroke="currentColor"
+            viewBox="0 0 24 24"
+          >
+            <path
+              strokeLinecap="round"
+              strokeLinejoin="round"
+              strokeWidth={2}
+              d="M4 4v5h.582m15.356 2A8.001 8.001 0 004.582 9m0 0H9m11 11v-5h-.581m0 0a8.003 8.003 0 01-15.357-2m15.357 2H15"
+            />
+          </svg>
+          Sync All Repos
+        </button>
       </div>
 
       {/* Filters */}
       <div className="card mb-6">
-        <div className="flex gap-4 items-center">
-          <label className="text-sm font-medium text-gray-700">Filter by tag:</label>
-          <select
-            className="input w-48"
-            value={tagFilter}
-            onChange={(e) => setTagFilter(e.target.value)}
-          >
-            <option value="">All tags</option>
-            {allTags.map((tag) => (
-              <option key={tag} value={tag}>
-                {tag}
-              </option>
-            ))}
-          </select>
+        <div className="flex flex-wrap gap-4 items-end">
+          {/* Search */}
+          <div className="flex-1 min-w-[200px]">
+            <label className="block text-sm font-medium text-gray-400 mb-2">Search</label>
+            <div className="relative">
+              <svg
+                className="absolute left-3 top-1/2 transform -translate-y-1/2 w-5 h-5 text-gray-500"
+                fill="none"
+                stroke="currentColor"
+                viewBox="0 0 24 24"
+              >
+                <path
+                  strokeLinecap="round"
+                  strokeLinejoin="round"
+                  strokeWidth={2}
+                  d="M21 21l-6-6m2-5a7 7 0 11-14 0 7 7 0 0114 0z"
+                />
+              </svg>
+              <input
+                type="text"
+                className="input pl-10"
+                placeholder="Search scenarios by name, path, or tag..."
+                value={searchQuery}
+                onChange={(e) => setSearchQuery(e.target.value)}
+              />
+            </div>
+          </div>
+
+          {/* Repository Filter */}
+          <div>
+            <label className="block text-sm font-medium text-gray-400 mb-2">Repository</label>
+            <select
+              className="input w-48"
+              value={selectedRepo}
+              onChange={(e) => setSelectedRepo(e.target.value)}
+            >
+              <option value="">All repositories</option>
+              {repos.map((repo) => (
+                <option key={repo.id} value={repo.id}>
+                  {repo.name}
+                </option>
+              ))}
+            </select>
+          </div>
+
+          {/* Tag Filter */}
+          <div>
+            <label className="block text-sm font-medium text-gray-400 mb-2">Tag</label>
+            <select
+              className="input w-40"
+              value={selectedTag}
+              onChange={(e) => setSelectedTag(e.target.value)}
+            >
+              <option value="">All tags</option>
+              {allTags.map((tag) => (
+                <option key={tag} value={tag}>
+                  @{tag}
+                </option>
+              ))}
+            </select>
+          </div>
+
+          {/* View Mode Toggle */}
+          <div className="flex gap-1 bg-gray-700 rounded-lg p-1">
+            <button
+              onClick={() => setViewMode('list')}
+              className={`p-2 rounded ${viewMode === 'list' ? 'bg-gray-600 text-white' : 'text-gray-400 hover:text-white'}`}
+              title="List view"
+            >
+              <svg className="w-5 h-5" fill="none" stroke="currentColor" viewBox="0 0 24 24">
+                <path strokeLinecap="round" strokeLinejoin="round" strokeWidth={2} d="M4 6h16M4 10h16M4 14h16M4 18h16" />
+              </svg>
+            </button>
+            <button
+              onClick={() => setViewMode('grid')}
+              className={`p-2 rounded ${viewMode === 'grid' ? 'bg-gray-600 text-white' : 'text-gray-400 hover:text-white'}`}
+              title="Grid view"
+            >
+              <svg className="w-5 h-5" fill="none" stroke="currentColor" viewBox="0 0 24 24">
+                <path strokeLinecap="round" strokeLinejoin="round" strokeWidth={2} d="M4 6a2 2 0 012-2h2a2 2 0 012 2v2a2 2 0 01-2 2H6a2 2 0 01-2-2V6zM14 6a2 2 0 012-2h2a2 2 0 012 2v2a2 2 0 01-2 2h-2a2 2 0 01-2-2V6zM4 16a2 2 0 012-2h2a2 2 0 012 2v2a2 2 0 01-2 2H6a2 2 0 01-2-2v-2zM14 16a2 2 0 012-2h2a2 2 0 012 2v2a2 2 0 01-2 2h-2a2 2 0 01-2-2v-2z" />
+              </svg>
+            </button>
+          </div>
+
+          {hasActiveFilters && (
+            <button onClick={clearFilters} className="btn btn-secondary btn-sm">
+              Clear Filters
+            </button>
+          )}
         </div>
+
+        {/* Active Filters Summary */}
+        {hasActiveFilters && (
+          <div className="flex items-center gap-2 mt-4 pt-4 border-t border-gray-700">
+            <span className="text-sm text-gray-500">Showing:</span>
+            <span className="text-sm text-gray-300">
+              {filteredScenarios.length} of {scenarios.length} scenarios
+            </span>
+          </div>
+        )}
       </div>
 
+      {/* Content */}
       {loading ? (
-        <div className="text-center py-12">Loading...</div>
+        <div className="space-y-4">
+          {[...Array(5)].map((_, i) => (
+            <div key={i} className="card animate-pulse">
+              <div className="flex justify-between">
+                <div className="space-y-3 flex-1">
+                  <div className="h-5 w-3/4 bg-gray-700 rounded" />
+                  <div className="h-4 w-1/2 bg-gray-700 rounded" />
+                </div>
+                <div className="flex gap-2">
+                  <div className="h-6 w-16 bg-gray-700 rounded-full" />
+                  <div className="h-6 w-16 bg-gray-700 rounded-full" />
+                </div>
+              </div>
+            </div>
+          ))}
+        </div>
       ) : scenarios.length === 0 ? (
-        <div className="card text-center py-12">
-          <p className="text-gray-500 mb-4">No scenarios found.</p>
-          <p className="text-sm text-gray-400">
-            Add a repository in <Link to="/repos" className="text-primary-600">Repos</Link> and sync to import scenarios.
+        <div className="card text-center py-16">
+          <svg
+            className="w-16 h-16 mx-auto text-gray-600 mb-4"
+            fill="none"
+            stroke="currentColor"
+            viewBox="0 0 24 24"
+          >
+            <path
+              strokeLinecap="round"
+              strokeLinejoin="round"
+              strokeWidth={1.5}
+              d="M9 12h6m-6 4h6m2 5H7a2 2 0 01-2-2V5a2 2 0 012-2h5.586a1 1 0 01.707.293l5.414 5.414a1 1 0 01.293.707V19a2 2 0 01-2 2z"
+            />
+          </svg>
+          <p className="text-gray-400 text-lg mb-2">No scenarios found</p>
+          <p className="text-gray-500 text-sm mb-6">
+            Add a repository in{' '}
+            <Link to="/repos" className="text-blue-400 hover:text-blue-300">
+              Repos
+            </Link>{' '}
+            and sync to import scenarios
           </p>
         </div>
-      ) : (
-        <div className="grid gap-4">
-          {scenarios.map((scenario) => (
+      ) : filteredScenarios.length === 0 ? (
+        <div className="card text-center py-12">
+          <svg
+            className="w-12 h-12 mx-auto text-gray-600 mb-4"
+            fill="none"
+            stroke="currentColor"
+            viewBox="0 0 24 24"
+          >
+            <path
+              strokeLinecap="round"
+              strokeLinejoin="round"
+              strokeWidth={1.5}
+              d="M21 21l-6-6m2-5a7 7 0 11-14 0 7 7 0 0114 0z"
+            />
+          </svg>
+          <p className="text-gray-400 mb-2">No scenarios match your filters</p>
+          <button onClick={clearFilters} className="text-blue-400 hover:text-blue-300 text-sm">
+            Clear all filters
+          </button>
+        </div>
+      ) : viewMode === 'grid' ? (
+        // Grid View
+        <div className="grid grid-cols-1 md:grid-cols-2 lg:grid-cols-3 gap-4">
+          {filteredScenarios.map((scenario) => (
             <Link
               key={scenario.id}
               to={`/scenarios/${scenario.id}`}
-              className="card hover:shadow-md transition-shadow"
+              className="card hover:border-blue-500/50 hover:shadow-lg transition-all group"
             >
-              <div className="flex justify-between items-start">
-                <div>
-                  <h3 className="font-semibold text-lg">{scenario.name}</h3>
-                  <p className="text-sm text-gray-500 mt-1">{scenario.feature_path}</p>
+              <div className="flex flex-col h-full">
+                <div className="flex-1">
+                  <h3 className="font-semibold text-gray-100 group-hover:text-blue-400 transition-colors mb-2">
+                    {scenario.name}
+                  </h3>
+                  <p className="text-sm text-gray-500 font-mono truncate" title={scenario.feature_path}>
+                    {scenario.feature_path}
+                  </p>
+                  {scenario.description && (
+                    <p className="text-sm text-gray-400 mt-2 line-clamp-2">{scenario.description}</p>
+                  )}
                 </div>
-                <div className="flex gap-2">
-                  {scenario.tags.map((tag) => (
-                    <span key={tag} className="badge badge-info">
-                      {tag}
-                    </span>
-                  ))}
+                <div className="mt-4 pt-4 border-t border-gray-700 flex justify-between items-center">
+                  <div className="flex flex-wrap gap-1.5">
+                    {scenario.tags?.slice(0, 3).map((tag) => (
+                      <span key={tag} className="badge badge-info text-xs">
+                        @{tag}
+                      </span>
+                    ))}
+                    {(scenario.tags?.length || 0) > 3 && (
+                      <span className="badge badge-pending text-xs">
+                        +{scenario.tags!.length - 3}
+                      </span>
+                    )}
+                  </div>
+                  {scenario.step_count && (
+                    <span className="text-xs text-gray-500">{scenario.step_count} steps</span>
+                  )}
                 </div>
               </div>
             </Link>
+          ))}
+        </div>
+      ) : (
+        // List View - Grouped by Feature
+        <div className="space-y-6">
+          {Object.entries(groupedByFeature).map(([featurePath, featureScenarios]) => (
+            <div key={featurePath} className="card p-0 overflow-hidden">
+              {/* Feature Header */}
+              <div className="px-6 py-4 bg-gray-900/50 border-b border-gray-700">
+                <div className="flex items-center justify-between">
+                  <div className="flex items-center gap-3">
+                    <svg
+                      className="w-5 h-5 text-gray-500"
+                      fill="none"
+                      stroke="currentColor"
+                      viewBox="0 0 24 24"
+                    >
+                      <path
+                        strokeLinecap="round"
+                        strokeLinejoin="round"
+                        strokeWidth={2}
+                        d="M9 12h6m-6 4h6m2 5H7a2 2 0 01-2-2V5a2 2 0 012-2h5.586a1 1 0 01.707.293l5.414 5.414a1 1 0 01.293.707V19a2 2 0 01-2 2z"
+                      />
+                    </svg>
+                    <span className="font-mono text-sm text-gray-300">{featurePath}</span>
+                  </div>
+                  <span className="text-sm text-gray-500">
+                    {featureScenarios.length} scenario{featureScenarios.length !== 1 ? 's' : ''}
+                  </span>
+                </div>
+              </div>
+
+              {/* Scenarios List */}
+              <div className="divide-y divide-gray-700">
+                {featureScenarios.map((scenario) => (
+                  <Link
+                    key={scenario.id}
+                    to={`/scenarios/${scenario.id}`}
+                    className="flex items-center justify-between px-6 py-4 hover:bg-gray-700/50 transition-colors group"
+                  >
+                    <div className="flex items-center gap-4">
+                      <svg
+                        className="w-5 h-5 text-gray-600 group-hover:text-blue-400 transition-colors"
+                        fill="none"
+                        stroke="currentColor"
+                        viewBox="0 0 24 24"
+                      >
+                        <path
+                          strokeLinecap="round"
+                          strokeLinejoin="round"
+                          strokeWidth={2}
+                          d="M13 10V3L4 14h7v7l9-11h-7z"
+                        />
+                      </svg>
+                      <div>
+                        <h3 className="font-medium text-gray-200 group-hover:text-blue-400 transition-colors">
+                          {scenario.name}
+                        </h3>
+                        {scenario.repo_name || scenario.repo_id ? (
+                          <p className="text-xs text-gray-500 mt-0.5">
+                            from {scenario.repo_name || getRepoName(scenario.repo_id)}
+                          </p>
+                        ) : null}
+                      </div>
+                    </div>
+                    <div className="flex items-center gap-4">
+                      <div className="flex flex-wrap gap-1.5 justify-end">
+                        {scenario.tags?.map((tag) => (
+                          <span key={tag} className="badge badge-info text-xs">
+                            @{tag}
+                          </span>
+                        ))}
+                      </div>
+                      <svg
+                        className="w-5 h-5 text-gray-600 group-hover:text-gray-400 transition-colors"
+                        fill="none"
+                        stroke="currentColor"
+                        viewBox="0 0 24 24"
+                      >
+                        <path
+                          strokeLinecap="round"
+                          strokeLinejoin="round"
+                          strokeWidth={2}
+                          d="M9 5l7 7-7 7"
+                        />
+                      </svg>
+                    </div>
+                  </Link>
+                ))}
+              </div>
+            </div>
           ))}
         </div>
       )}
