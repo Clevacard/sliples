@@ -9,7 +9,7 @@ from sqlalchemy.orm import Session
 from pydantic import BaseModel
 
 from app.database import get_db
-from app.api.deps import get_api_key
+from app.api.deps import get_api_key_or_user
 from app.seed_data import seed_database, clear_seed_data
 
 router = APIRouter()
@@ -54,7 +54,7 @@ class ClearResponse(BaseModel):
 )
 async def create_seed_data(
     db: Session = Depends(get_db),
-    api_key: str = Depends(get_api_key),
+    auth = Depends(get_api_key_or_user),
 ) -> SeedResponse:
     """
     Populate the database with example Giftstarr test data.
@@ -95,7 +95,7 @@ async def create_seed_data(
 )
 async def delete_seed_data(
     db: Session = Depends(get_db),
-    api_key: str = Depends(get_api_key),
+    auth = Depends(get_api_key_or_user),
 ) -> ClearResponse:
     """
     Clear all Giftstarr example data from the database.
@@ -121,7 +121,7 @@ async def delete_seed_data(
 )
 async def get_seed_status(
     db: Session = Depends(get_db),
-    api_key: str = Depends(get_api_key),
+    auth = Depends(get_api_key_or_user),
 ) -> dict:
     """
     Check the current status of seed data in the database.

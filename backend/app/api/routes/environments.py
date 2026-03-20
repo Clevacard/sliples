@@ -10,7 +10,7 @@ from pydantic import BaseModel, field_validator, Field
 
 from app.database import get_db
 from app.models import Environment, BrowserConfig
-from app.api.deps import get_api_key
+from app.api.deps import get_api_key_or_user
 
 router = APIRouter()
 
@@ -111,7 +111,7 @@ class EnvironmentResponse(BaseModel):
 @router.get("/environments", response_model=list[EnvironmentResponse])
 async def list_environments(
     db: Session = Depends(get_db),
-    api_key: str = Depends(get_api_key),
+    auth = Depends(get_api_key_or_user),
 ):
     """List all environments."""
     environments = db.query(Environment).all()
@@ -122,7 +122,7 @@ async def list_environments(
 async def create_environment(
     env: EnvironmentCreate,
     db: Session = Depends(get_db),
-    api_key: str = Depends(get_api_key),
+    auth = Depends(get_api_key_or_user),
 ):
     """Create a new environment."""
     existing = db.query(Environment).filter(Environment.name == env.name).first()
@@ -158,7 +158,7 @@ async def create_environment(
 async def get_environment(
     environment_id: UUID,
     db: Session = Depends(get_db),
-    api_key: str = Depends(get_api_key),
+    auth = Depends(get_api_key_or_user),
 ):
     """Get an environment by ID."""
     env = db.query(Environment).filter(Environment.id == environment_id).first()
@@ -172,7 +172,7 @@ async def update_environment(
     environment_id: UUID,
     env_update: EnvironmentUpdate,
     db: Session = Depends(get_db),
-    api_key: str = Depends(get_api_key),
+    auth = Depends(get_api_key_or_user),
 ):
     """Update an environment."""
     env = db.query(Environment).filter(Environment.id == environment_id).first()
@@ -213,7 +213,7 @@ async def update_environment(
 async def delete_environment(
     environment_id: UUID,
     db: Session = Depends(get_db),
-    api_key: str = Depends(get_api_key),
+    auth = Depends(get_api_key_or_user),
 ):
     """Delete an environment."""
     env = db.query(Environment).filter(Environment.id == environment_id).first()
@@ -233,7 +233,7 @@ async def delete_environment(
 async def list_browser_configs(
     environment_id: UUID,
     db: Session = Depends(get_db),
-    api_key: str = Depends(get_api_key),
+    auth = Depends(get_api_key_or_user),
 ):
     """List browser configurations for an environment."""
     env = db.query(Environment).filter(Environment.id == environment_id).first()
@@ -252,7 +252,7 @@ async def add_browser_config(
     environment_id: UUID,
     config: BrowserConfigCreate,
     db: Session = Depends(get_db),
-    api_key: str = Depends(get_api_key),
+    auth = Depends(get_api_key_or_user),
 ):
     """Add a browser configuration to an environment."""
     env = db.query(Environment).filter(Environment.id == environment_id).first()
@@ -292,7 +292,7 @@ async def update_browser_config(
     browser_config_id: UUID,
     config: BrowserConfigCreate,
     db: Session = Depends(get_db),
-    api_key: str = Depends(get_api_key),
+    auth = Depends(get_api_key_or_user),
 ):
     """Update a browser configuration."""
     env = db.query(Environment).filter(Environment.id == environment_id).first()
@@ -323,7 +323,7 @@ async def delete_browser_config(
     environment_id: UUID,
     browser_config_id: UUID,
     db: Session = Depends(get_db),
-    api_key: str = Depends(get_api_key),
+    auth = Depends(get_api_key_or_user),
 ):
     """Delete a browser configuration."""
     env = db.query(Environment).filter(Environment.id == environment_id).first()

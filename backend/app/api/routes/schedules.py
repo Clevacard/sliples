@@ -11,7 +11,7 @@ from croniter import croniter
 
 from app.database import get_db
 from app.models import Schedule, Environment, Scenario
-from app.api.deps import get_api_key
+from app.api.deps import get_api_key_or_user
 
 router = APIRouter()
 
@@ -230,7 +230,7 @@ def schedule_to_response(schedule: Schedule) -> ScheduleResponse:
 async def list_schedules(
     enabled_only: bool = False,
     db: Session = Depends(get_db),
-    api_key: str = Depends(get_api_key),
+    auth = Depends(get_api_key_or_user),
 ):
     """List all schedules."""
     query = db.query(Schedule)
@@ -244,7 +244,7 @@ async def list_schedules(
 async def create_schedule(
     schedule: ScheduleCreate,
     db: Session = Depends(get_db),
-    api_key: str = Depends(get_api_key),
+    auth = Depends(get_api_key_or_user),
 ):
     """Create a new schedule."""
     # Verify environment exists
@@ -288,7 +288,7 @@ async def create_schedule(
 async def get_schedule(
     schedule_id: UUID,
     db: Session = Depends(get_db),
-    api_key: str = Depends(get_api_key),
+    auth = Depends(get_api_key_or_user),
 ):
     """Get a schedule by ID."""
     schedule = db.query(Schedule).filter(Schedule.id == schedule_id).first()
@@ -302,7 +302,7 @@ async def update_schedule(
     schedule_id: UUID,
     schedule_update: ScheduleUpdate,
     db: Session = Depends(get_db),
-    api_key: str = Depends(get_api_key),
+    auth = Depends(get_api_key_or_user),
 ):
     """Update a schedule."""
     schedule = db.query(Schedule).filter(Schedule.id == schedule_id).first()
@@ -352,7 +352,7 @@ async def update_schedule(
 async def delete_schedule(
     schedule_id: UUID,
     db: Session = Depends(get_db),
-    api_key: str = Depends(get_api_key),
+    auth = Depends(get_api_key_or_user),
 ):
     """Delete a schedule."""
     schedule = db.query(Schedule).filter(Schedule.id == schedule_id).first()
@@ -367,7 +367,7 @@ async def delete_schedule(
 async def toggle_schedule(
     schedule_id: UUID,
     db: Session = Depends(get_db),
-    api_key: str = Depends(get_api_key),
+    auth = Depends(get_api_key_or_user),
 ):
     """Toggle a schedule's enabled status."""
     schedule = db.query(Schedule).filter(Schedule.id == schedule_id).first()
@@ -391,7 +391,7 @@ async def toggle_schedule(
 async def run_schedule_now(
     schedule_id: UUID,
     db: Session = Depends(get_db),
-    api_key: str = Depends(get_api_key),
+    auth = Depends(get_api_key_or_user),
 ):
     """Manually trigger a scheduled run immediately."""
     from app.workers.tasks import execute_scheduled_run
@@ -413,7 +413,7 @@ async def run_schedule_now(
 @router.get("/schedules/cron/describe")
 async def describe_cron(
     expression: str,
-    api_key: str = Depends(get_api_key),
+    auth = Depends(get_api_key_or_user),
 ):
     """Get a human-readable description and next runs for a cron expression."""
     try:

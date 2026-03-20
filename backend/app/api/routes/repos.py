@@ -10,7 +10,7 @@ from pydantic import BaseModel
 
 from app.database import get_db
 from app.models import ScenarioRepo
-from app.api.deps import get_api_key
+from app.api.deps import get_api_key_or_user
 from app.workers.tasks import sync_repository, sync_all_repositories
 
 router = APIRouter()
@@ -38,7 +38,7 @@ class RepoResponse(BaseModel):
 @router.get("/repos", response_model=list[RepoResponse])
 async def list_repos(
     db: Session = Depends(get_db),
-    api_key: str = Depends(get_api_key),
+    auth = Depends(get_api_key_or_user),
 ):
     """List all configured scenario repositories."""
     return db.query(ScenarioRepo).all()
@@ -48,7 +48,7 @@ async def list_repos(
 async def create_repo(
     repo: RepoCreate,
     db: Session = Depends(get_db),
-    api_key: str = Depends(get_api_key),
+    auth = Depends(get_api_key_or_user),
 ):
     """Add a new scenario repository."""
     existing = db.query(ScenarioRepo).filter(ScenarioRepo.name == repo.name).first()
@@ -71,7 +71,7 @@ async def create_repo(
 async def sync_repo(
     repo_id: UUID,
     db: Session = Depends(get_db),
-    api_key: str = Depends(get_api_key),
+    auth = Depends(get_api_key_or_user),
 ):
     """Sync scenarios from a specific repository."""
     repo = db.query(ScenarioRepo).filter(ScenarioRepo.id == repo_id).first()
@@ -91,7 +91,7 @@ async def sync_repo(
 @router.post("/repos/sync-all")
 async def sync_all_repos(
     db: Session = Depends(get_db),
-    api_key: str = Depends(get_api_key),
+    auth = Depends(get_api_key_or_user),
 ):
     """Sync scenarios from all repositories."""
     repos = db.query(ScenarioRepo).all()
@@ -113,7 +113,7 @@ async def sync_all_repos(
 async def delete_repo(
     repo_id: UUID,
     db: Session = Depends(get_db),
-    api_key: str = Depends(get_api_key),
+    auth = Depends(get_api_key_or_user),
 ):
     """Delete a repository and its scenarios."""
     repo = db.query(ScenarioRepo).filter(ScenarioRepo.id == repo_id).first()

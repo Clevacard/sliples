@@ -11,7 +11,7 @@ from pydantic import BaseModel
 
 from app.database import get_db
 from app.models import TestRun, TestResult, Environment, RunStatus, Scenario
-from app.api.deps import get_api_key
+from app.api.deps import get_api_key_or_user
 from app.config import get_settings
 from app.workers.tasks import execute_test_run
 
@@ -67,7 +67,7 @@ async def list_runs(
     limit: int = 50,
     offset: int = 0,
     db: Session = Depends(get_db),
-    api_key: str = Depends(get_api_key),
+    auth = Depends(get_api_key_or_user),
 ):
     """List test runs."""
     query = db.query(TestRun).order_by(TestRun.created_at.desc())
@@ -85,7 +85,7 @@ async def list_runs(
 async def create_run(
     run: TestRunCreate,
     db: Session = Depends(get_db),
-    api_key: str = Depends(get_api_key),
+    auth = Depends(get_api_key_or_user),
 ):
     """
     Trigger a new test run.
@@ -134,7 +134,7 @@ async def create_run(
         status=RunStatus.QUEUED,
         browser=browser,
         browser_version="latest",
-        triggered_by=api_key[:8] if api_key else None,
+        triggered_by=auth.email if hasattr(auth, 'email') else (auth[:8] if isinstance(auth, str) else None),
         parallel=run.parallel,
         expires_at=expires_at,
     )
@@ -153,7 +153,7 @@ async def create_run(
 async def get_run(
     run_id: UUID,
     db: Session = Depends(get_db),
-    api_key: str = Depends(get_api_key),
+    auth = Depends(get_api_key_or_user),
 ):
     """Get a test run by ID."""
     run = db.query(TestRun).filter(TestRun.id == run_id).first()
@@ -166,7 +166,7 @@ async def get_run(
 async def cancel_run(
     run_id: UUID,
     db: Session = Depends(get_db),
-    api_key: str = Depends(get_api_key),
+    auth = Depends(get_api_key_or_user),
 ):
     """Cancel a running test."""
     run = db.query(TestRun).filter(TestRun.id == run_id).first()
@@ -185,7 +185,7 @@ async def cancel_run(
 async def get_run_report(
     run_id: UUID,
     db: Session = Depends(get_db),
-    api_key: str = Depends(get_api_key),
+    auth = Depends(get_api_key_or_user),
 ):
     """Get the HTML report for a test run."""
     run = db.query(TestRun).filter(TestRun.id == run_id).first()
@@ -202,7 +202,7 @@ async def get_run_report(
 async def get_run_status(
     run_id: UUID,
     db: Session = Depends(get_db),
-    api_key: str = Depends(get_api_key),
+    auth = Depends(get_api_key_or_user),
 ):
     """Get just the status of a test run (lightweight polling endpoint)."""
     run = db.query(TestRun).filter(TestRun.id == run_id).first()
@@ -227,7 +227,7 @@ async def get_run_status(
 async def retry_run(
     run_id: UUID,
     db: Session = Depends(get_db),
-    api_key: str = Depends(get_api_key),
+    auth = Depends(get_api_key_or_user),
 ):
     """Retry a failed or cancelled test run by creating a new run with the same configuration."""
     original_run = db.query(TestRun).filter(TestRun.id == run_id).first()
@@ -249,7 +249,7 @@ async def retry_run(
         status=RunStatus.QUEUED,
         browser=original_run.browser,
         browser_version=original_run.browser_version,
-        triggered_by=api_key[:8] if api_key else None,
+        triggered_by=auth.email if hasattr(auth, 'email') else (auth[:8] if isinstance(auth, str) else None),
         parallel=original_run.parallel,
         expires_at=expires_at,
     )
@@ -272,7 +272,7 @@ async def update_run_status(
     run_id: UUID,
     update: RunStatusUpdate,
     db: Session = Depends(get_db),
-    api_key: str = Depends(get_api_key),
+    auth = Depends(get_api_key_or_user),
 ):
     """
     Update the status of a test run (internal use / worker callback).

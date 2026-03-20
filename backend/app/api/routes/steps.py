@@ -9,7 +9,7 @@ from pydantic import BaseModel
 
 from app.database import get_db
 from app.models import CustomStep, ScenarioRepo
-from app.api.deps import get_api_key
+from app.api.deps import get_api_key_or_user
 
 router = APIRouter()
 
@@ -43,7 +43,7 @@ class StepResponse(BaseModel):
 async def list_custom_steps(
     repo_id: Optional[UUID] = None,
     db: Session = Depends(get_db),
-    api_key: str = Depends(get_api_key),
+    auth = Depends(get_api_key_or_user),
 ):
     """List all custom step definitions."""
     query = db.query(CustomStep)
@@ -56,7 +56,7 @@ async def list_custom_steps(
 async def create_custom_step(
     step: StepCreate,
     db: Session = Depends(get_db),
-    api_key: str = Depends(get_api_key),
+    auth = Depends(get_api_key_or_user),
 ):
     """Create a new custom step definition."""
     # Validate repo if provided
@@ -87,7 +87,7 @@ async def update_custom_step(
     step_id: UUID,
     step_update: StepUpdate,
     db: Session = Depends(get_db),
-    api_key: str = Depends(get_api_key),
+    auth = Depends(get_api_key_or_user),
 ):
     """Update a custom step definition."""
     step = db.query(CustomStep).filter(CustomStep.id == step_id).first()
@@ -111,7 +111,7 @@ async def update_custom_step(
 async def save_step_to_repo(
     step_id: UUID,
     db: Session = Depends(get_db),
-    api_key: str = Depends(get_api_key),
+    auth = Depends(get_api_key_or_user),
 ):
     """Commit a custom step definition to its repository."""
     step = db.query(CustomStep).filter(CustomStep.id == step_id).first()
@@ -132,7 +132,7 @@ async def save_step_to_repo(
 async def delete_custom_step(
     step_id: UUID,
     db: Session = Depends(get_db),
-    api_key: str = Depends(get_api_key),
+    auth = Depends(get_api_key_or_user),
 ):
     """Delete a custom step definition."""
     step = db.query(CustomStep).filter(CustomStep.id == step_id).first()

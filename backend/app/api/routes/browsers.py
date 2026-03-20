@@ -2,14 +2,14 @@
 
 from fastapi import APIRouter, Depends
 
-from app.api.deps import get_api_key
+from app.api.deps import get_api_key_or_user
 
 router = APIRouter()
 
 
 @router.get("/browsers")
 async def list_browsers(
-    api_key: str = Depends(get_api_key),
+    auth = Depends(get_api_key_or_user),
 ):
     """List available browsers and their versions."""
     return {

@@ -11,7 +11,7 @@ from pydantic import BaseModel
 
 from app.database import get_db
 from app.models import Scenario, ScenarioRepo
-from app.api.deps import get_api_key
+from app.api.deps import get_api_key_or_user
 from app.workers.tasks import sync_all_repositories
 
 router = APIRouter()
@@ -46,7 +46,7 @@ class AllTagsResponse(BaseModel):
 @router.get("/scenarios/tags", response_model=AllTagsResponse)
 async def list_all_tags(
     db: Session = Depends(get_db),
-    api_key: str = Depends(get_api_key),
+    auth = Depends(get_api_key_or_user),
 ):
     """Get a list of all unique tags across all scenarios."""
     scenarios = db.query(Scenario.tags).all()
@@ -69,7 +69,7 @@ async def list_scenarios(
     limit: int = Query(100, ge=1, le=500),
     offset: int = Query(0, ge=0),
     db: Session = Depends(get_db),
-    api_key: str = Depends(get_api_key),
+    auth = Depends(get_api_key_or_user),
 ):
     """
     List all scenarios, optionally filtered by tag(s), repo, or search term.
@@ -103,7 +103,7 @@ async def list_scenarios(
 async def get_scenario(
     scenario_id: UUID,
     db: Session = Depends(get_db),
-    api_key: str = Depends(get_api_key),
+    auth = Depends(get_api_key_or_user),
 ):
     """Get a scenario by ID, including its full content."""
     scenario = db.query(Scenario).filter(Scenario.id == scenario_id).first()
@@ -116,7 +116,7 @@ async def get_scenario(
 async def get_scenario_content(
     scenario_id: UUID,
     db: Session = Depends(get_db),
-    api_key: str = Depends(get_api_key),
+    auth = Depends(get_api_key_or_user),
 ):
     """Get just the content of a scenario (Gherkin text)."""
     scenario = db.query(Scenario).filter(Scenario.id == scenario_id).first()
@@ -134,7 +134,7 @@ async def get_scenario_content(
 @router.post("/scenarios/sync")
 async def sync_scenarios(
     db: Session = Depends(get_db),
-    api_key: str = Depends(get_api_key),
+    auth = Depends(get_api_key_or_user),
 ):
     """
     Sync scenarios from all configured repositories.
