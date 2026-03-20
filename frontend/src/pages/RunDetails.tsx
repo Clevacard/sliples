@@ -138,7 +138,7 @@ export default function RunDetails() {
 
   if (loading) {
     return (
-      <div className="animate-pulse">
+      <div className="p-8 animate-pulse">
         <div className="h-8 w-48 bg-gray-700 rounded mb-8" />
         <div className="grid grid-cols-5 gap-4 mb-8">
           {[...Array(5)].map((_, i) => (
@@ -152,7 +152,7 @@ export default function RunDetails() {
 
   if (!run) {
     return (
-      <div className="text-center py-16">
+      <div className="p-8 text-center py-16">
         <svg
           className="w-16 h-16 mx-auto text-gray-600 mb-4"
           fill="none"
@@ -178,7 +178,7 @@ export default function RunDetails() {
   }
 
   return (
-    <div>
+    <div className="p-8">
       {/* Back Button */}
       <button
         onClick={() => navigate('/runs')}

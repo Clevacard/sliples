@@ -11,6 +11,7 @@ import RunDetails from './pages/RunDetails'
 import Environments from './pages/Environments'
 import Repos from './pages/Repos'
 import Settings from './pages/Settings'
+import CustomSteps from './pages/CustomSteps'
 
 function App() {
   return (
@@ -36,6 +37,7 @@ function App() {
         <Route path="runs/:id" element={<RunDetails />} />
         <Route path="environments" element={<Environments />} />
         <Route path="repos" element={<Repos />} />
+        <Route path="custom-steps" element={<CustomSteps />} />
         <Route path="settings" element={<Settings />} />
       </Route>
     </Routes>

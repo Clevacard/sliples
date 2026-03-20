@@ -293,7 +293,7 @@ export default function Settings() {
   const [activeTab, setActiveTab] = useState<TabId>('profile')
 
   return (
-    <div>
+    <div className="p-8">
       <h1 className="text-3xl font-bold text-gray-100 mb-8">Settings</h1>
 
       {/* Tab Navigation */}

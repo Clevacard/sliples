@@ -249,7 +249,7 @@ export default function Repos() {
   }
 
   return (
-    <div>
+    <div className="p-8">
       {/* Success Message */}
       {successMessage && (
         <div className="mb-6 p-4 bg-green-500/20 border border-green-500/30 rounded-lg flex items-center justify-between">

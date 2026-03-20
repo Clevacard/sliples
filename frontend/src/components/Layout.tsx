@@ -4,6 +4,7 @@ import UserMenu from './UserMenu'
 const navigation = [
   { name: 'Dashboard', path: '/dashboard' },
   { name: 'Scenarios', path: '/scenarios' },
+  { name: 'Custom Steps', path: '/custom-steps' },
   { name: 'Test Runs', path: '/runs' },
   { name: 'Environments', path: '/environments' },
   { name: 'Repos', path: '/repos' },
@@ -52,9 +53,7 @@ export default function Layout() {
 
         {/* Page content */}
         <main className="flex-1 overflow-auto">
-          <div className="p-8">
-            <Outlet />
-          </div>
+          <Outlet />
         </main>
       </div>
     </div>

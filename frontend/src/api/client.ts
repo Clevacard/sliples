@@ -239,3 +239,73 @@ export async function createApiKey(name: string): Promise<CreateApiKeyResponse> 
 export async function revokeApiKey(id: string): Promise<void> {
   await api.delete(`/auth/keys/${id}`)
 }
+
+// Custom Steps
+export interface CustomStep {
+  id: string
+  name: string
+  pattern: string
+  description?: string
+  implementation: string
+  created_at?: string
+  updated_at?: string
+}
+
+export interface CustomStepCreate {
+  name: string
+  pattern: string
+  description?: string
+  implementation: string
+}
+
+export interface CustomStepUpdate {
+  name?: string
+  pattern?: string
+  description?: string
+  implementation?: string
+}
+
+export async function listCustomSteps(): Promise<CustomStep[]> {
+  const response = await api.get('/steps')
+  return response.data
+}
+
+export async function getCustomStep(id: string): Promise<CustomStep> {
+  const response = await api.get(`/steps/${id}`)
+  return response.data
+}
+
+export async function createCustomStep(data: CustomStepCreate): Promise<CustomStep> {
+  const response = await api.post('/steps', data)
+  return response.data
+}
+
+export async function updateCustomStep(id: string, data: CustomStepUpdate): Promise<CustomStep> {
+  const response = await api.put(`/steps/${id}`, data)
+  return response.data
+}
+
+export async function deleteCustomStep(id: string): Promise<void> {
+  await api.delete(`/steps/${id}`)
+}
+
+// Scenario Content (for editor)
+export interface ScenarioContent {
+  id: string
+  name: string
+  feature_path: string
+  repo_id?: string
+  repo_name?: string
+  tags: string[]
+  content: string
+}
+
+export async function getScenarioContent(id: string): Promise<ScenarioContent> {
+  const response = await api.get(`/scenarios/${id}/content`)
+  return response.data
+}
+
+export async function updateScenarioContent(id: string, content: string): Promise<ScenarioContent> {
+  const response = await api.put(`/scenarios/${id}/content`, { content })
+  return response.data
+}

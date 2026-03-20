@@ -157,14 +157,14 @@ export default function Dashboard() {
 
   if (isLoading) {
     return (
-      <div className="p-6">
+      <div className="p-8">
         <DashboardSkeleton />
       </div>
     )
   }
 
   return (
-    <div>
+    <div className="p-8">
       {/* Error Alert */}
       {error && (
         <div className="mb-6 p-4 bg-red-500/20 border border-red-500/30 rounded-lg flex items-center justify-between">

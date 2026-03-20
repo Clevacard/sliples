@@ -193,7 +193,7 @@ export default function TestRuns() {
   }
 
   return (
-    <div>
+    <div className="p-8">
       {/* Header */}
       <div className="flex justify-between items-center mb-8">
         <div>
