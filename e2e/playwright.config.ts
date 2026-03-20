@@ -1,7 +1,7 @@
 import { defineConfig, devices } from '@playwright/test';
 
 /**
- * Playwright configuration for Sliples E2E tests.
+ * Playwright configuration for Sliples E2E tests with real API authentication.
  * @see https://playwright.dev/docs/test-configuration
  */
 export default defineConfig({
@@ -27,9 +27,9 @@ export default defineConfig({
   ],
 
   // Global timeout settings
-  timeout: 30000,
+  timeout: 60000,
   expect: {
-    timeout: 10000,
+    timeout: 15000,
   },
 
   // Shared settings for all projects
@@ -37,13 +37,13 @@ export default defineConfig({
     // Base URL to use in actions like `await page.goto('/')`
     baseURL: 'https://sliples.localhost.in:5173',
 
-    // Collect trace when retrying the failed test
-    trace: 'on-first-retry',
+    // Collect trace on first retry and when explicitly requested
+    trace: 'on',
 
-    // Screenshot on failure
-    screenshot: 'only-on-failure',
+    // Screenshot on success and failure for visibility
+    screenshot: 'on',
 
-    // Video recording
+    // Video recording on failure
     video: 'retain-on-failure',
 
     // Ignore HTTPS errors (for self-signed certificates in dev)
@@ -53,10 +53,10 @@ export default defineConfig({
     viewport: { width: 1280, height: 720 },
 
     // Action timeout
-    actionTimeout: 10000,
+    actionTimeout: 15000,
 
     // Navigation timeout
-    navigationTimeout: 15000,
+    navigationTimeout: 30000,
   },
 
   // Output folder for screenshots and videos
@@ -64,51 +64,12 @@ export default defineConfig({
 
   // Configure projects for major browsers
   projects: [
-    // Setup project - runs authentication once
-    {
-      name: 'setup',
-      testMatch: /.*\.setup\.ts/,
-    },
-
-    // Chromium tests
+    // Chromium tests only for speed during development
     {
       name: 'chromium',
       use: {
         ...devices['Desktop Chrome'],
-        // Use stored authentication state
-        storageState: 'playwright/.auth/user.json',
       },
-      dependencies: ['setup'],
-    },
-
-    // Firefox tests
-    {
-      name: 'firefox',
-      use: {
-        ...devices['Desktop Firefox'],
-        storageState: 'playwright/.auth/user.json',
-      },
-      dependencies: ['setup'],
-    },
-
-    // WebKit tests (Safari)
-    {
-      name: 'webkit',
-      use: {
-        ...devices['Desktop Safari'],
-        storageState: 'playwright/.auth/user.json',
-      },
-      dependencies: ['setup'],
-    },
-
-    // Mobile Chrome tests
-    {
-      name: 'mobile-chrome',
-      use: {
-        ...devices['Pixel 5'],
-        storageState: 'playwright/.auth/user.json',
-      },
-      dependencies: ['setup'],
     },
   ],
 

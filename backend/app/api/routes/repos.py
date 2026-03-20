@@ -29,7 +29,7 @@ class RepoResponse(BaseModel):
     git_url: str
     branch: str
     sync_path: str
-    last_synced: Optional[str]
+    last_synced: Optional[datetime] = None
 
     class Config:
         from_attributes = True

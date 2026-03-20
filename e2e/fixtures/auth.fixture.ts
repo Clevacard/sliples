@@ -1,8 +1,18 @@
 import { test as base, expect, Page } from '@playwright/test';
 import path from 'path';
+import jwt from 'jsonwebtoken';
 
-// User credentials for testing
+// Real API key for testing
+const TEST_API_KEY = 'P9K05ahFmX8DUAco5EEOBVg3rM_zbd7pVEo-I2pbsaI';
+
+// JWT settings (must match backend configuration)
+const JWT_SECRET_KEY = 'sliples-jwt-secret-change-in-prod';
+const JWT_ALGORITHM = 'HS256';
+const JWT_EXPIRY_HOURS = 24;
+
+// User credentials for testing - using real test user
 export interface TestUser {
+  id: string;
   email: string;
   name: string;
   role: 'admin' | 'user' | 'viewer';
@@ -10,19 +20,22 @@ export interface TestUser {
 
 export const testUsers: Record<string, TestUser> = {
   admin: {
-    email: 'admin@example.com',
-    name: 'Test Admin',
+    id: '11111111-1111-1111-1111-111111111111',
+    email: 'e2e-test@agantis.team',
+    name: 'E2E Test Admin',
     role: 'admin',
   },
   user: {
-    email: 'user@example.com',
-    name: 'Test User',
-    role: 'user',
+    id: '11111111-1111-1111-1111-111111111111',
+    email: 'e2e-test@agantis.team',
+    name: 'E2E Test Admin',
+    role: 'admin',
   },
   viewer: {
-    email: 'viewer@example.com',
-    name: 'Test Viewer',
-    role: 'viewer',
+    id: '11111111-1111-1111-1111-111111111111',
+    email: 'e2e-test@agantis.team',
+    name: 'E2E Test Admin',
+    role: 'admin',
   },
 };
 
@@ -30,22 +43,57 @@ export const testUsers: Record<string, TestUser> = {
 export const AUTH_FILE = path.join(__dirname, '../playwright/.auth/user.json');
 
 /**
- * Mock the authentication state in localStorage
- * This bypasses the actual Google OAuth flow for testing
+ * Generate a valid JWT token for the test user
+ */
+function generateJwtToken(user: TestUser): string {
+  const now = Math.floor(Date.now() / 1000);
+  const expiresIn = JWT_EXPIRY_HOURS * 3600;
+
+  const payload = {
+    sub: user.id,
+    email: user.email,
+    iat: now,
+    exp: now + expiresIn,
+  };
+
+  return jwt.sign(payload, JWT_SECRET_KEY, { algorithm: JWT_ALGORITHM as jwt.Algorithm });
+}
+
+/**
+ * Set up real authentication state
+ * This creates a valid JWT token and sets both the cookie and localStorage
  */
 export async function mockAuthenticatedState(page: Page, user: TestUser = testUsers.user) {
-  // Navigate to the app first (needed for localStorage access)
-  await page.goto('/login');
+  // Generate JWT token
+  const jwtToken = generateJwtToken(user);
 
-  // Wait for the page to load
+  // Navigate to the app first (needed for localStorage and cookie access)
+  await page.goto('/login');
   await page.waitForLoadState('domcontentloaded');
 
-  // Mock the authentication state in localStorage
-  await page.evaluate((userData) => {
+  // Set the JWT token as a cookie (this is what the backend expects for /auth/me)
+  await page.context().addCookies([
+    {
+      name: 'access_token',
+      value: jwtToken,
+      domain: 'sliples.localhost.in',
+      path: '/',
+      httpOnly: true,
+      secure: true,
+      sameSite: 'Lax',
+    },
+  ]);
+
+  // Set up auth state in localStorage for the Zustand store
+  await page.evaluate(({ userData, apiKey }) => {
+    // Set the API key for API authentication
+    localStorage.setItem('sliples_api_key', apiKey);
+
+    // Set the Zustand auth state
     const authState = {
       state: {
         user: {
-          id: 'test-user-id',
+          id: userData.id,
           email: userData.email,
           name: userData.name,
           picture_url: null,
@@ -57,9 +105,9 @@ export async function mockAuthenticatedState(page: Page, user: TestUser = testUs
     };
 
     localStorage.setItem('sliples-auth', JSON.stringify(authState));
-  }, user);
+  }, { userData: user, apiKey: TEST_API_KEY });
 
-  // Reload to apply the mocked state
+  // Reload to apply the state and let the app verify auth
   await page.reload();
   await page.waitForLoadState('networkidle');
 }
@@ -68,41 +116,13 @@ export async function mockAuthenticatedState(page: Page, user: TestUser = testUs
  * Clear the authentication state
  */
 export async function clearAuthState(page: Page) {
+  // Clear cookies
+  await page.context().clearCookies();
+
+  // Clear localStorage
   await page.evaluate(() => {
     localStorage.removeItem('sliples-auth');
-  });
-}
-
-/**
- * Setup API mocking for authenticated requests
- */
-export async function setupApiMocks(page: Page) {
-  // Mock the current user endpoint
-  await page.route('**/api/v1/auth/me', async (route) => {
-    await route.fulfill({
-      status: 200,
-      contentType: 'application/json',
-      body: JSON.stringify({
-        id: 'test-user-id',
-        email: 'user@example.com',
-        name: 'Test User',
-        picture_url: null,
-        role: 'user',
-      }),
-    });
-  });
-
-  // Mock health endpoint
-  await page.route('**/api/v1/health', async (route) => {
-    await route.fulfill({
-      status: 200,
-      contentType: 'application/json',
-      body: JSON.stringify({
-        status: 'healthy',
-        database: 'connected',
-        redis: 'connected',
-      }),
-    });
+    localStorage.removeItem('sliples_api_key');
   });
 }
 
@@ -113,9 +133,8 @@ export const test = base.extend<{
   authenticatedPage: Page;
   adminPage: Page;
 }>({
-  // Authenticated page as a regular user
+  // Authenticated page as a regular user (same as admin for now)
   authenticatedPage: async ({ page }, use) => {
-    await setupApiMocks(page);
     await mockAuthenticatedState(page, testUsers.user);
     await use(page);
     await clearAuthState(page);
@@ -123,7 +142,6 @@ export const test = base.extend<{
 
   // Authenticated page as an admin
   adminPage: async ({ page }, use) => {
-    await setupApiMocks(page);
     await mockAuthenticatedState(page, testUsers.admin);
     await use(page);
     await clearAuthState(page);

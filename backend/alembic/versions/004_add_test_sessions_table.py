@@ -19,7 +19,7 @@ depends_on: Union[str, Sequence[str], None] = None
 
 
 def upgrade() -> None:
-    # Create session status enum
+    # Create session status enum (only if it doesn't exist)
     session_status_enum = postgresql.ENUM(
         'active', 'paused', 'completed', 'terminated',
         name='sessionstatus',
@@ -34,7 +34,7 @@ def upgrade() -> None:
         sa.Column('user_id', postgresql.UUID(as_uuid=True), nullable=True),
         sa.Column('scenario_id', postgresql.UUID(as_uuid=True), nullable=True),
         sa.Column('environment_id', postgresql.UUID(as_uuid=True), nullable=False),
-        sa.Column('status', sa.Enum('active', 'paused', 'completed', 'terminated', name='sessionstatus'), nullable=True),
+        sa.Column('status', postgresql.ENUM('active', 'paused', 'completed', 'terminated', name='sessionstatus', create_type=False), nullable=True),
         sa.Column('browser_type', sa.String(50), nullable=True, server_default='chromium'),
         sa.Column('current_step_index', sa.String(50), nullable=True, server_default='0'),
         sa.Column('started_at', sa.DateTime(), nullable=True, server_default=sa.func.now()),
