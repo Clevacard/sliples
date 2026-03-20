@@ -14,6 +14,7 @@ import Settings from './pages/Settings'
 import CustomSteps from './pages/CustomSteps'
 import Schedules from './pages/Schedules'
 import Users from './pages/Users'
+import TestMode from './pages/TestMode'
 import AdminRoute from './components/AdminRoute'
 
 function App() {
@@ -42,6 +43,7 @@ function App() {
         <Route path="repos" element={<Repos />} />
         <Route path="custom-steps" element={<CustomSteps />} />
         <Route path="schedules" element={<Schedules />} />
+        <Route path="test-mode" element={<TestMode />} />
         <Route path="settings" element={<Settings />} />
         <Route
           path="users"

@@ -8,6 +8,7 @@ from app.models.api_key import ApiKey
 from app.models.custom_step import CustomStep
 from app.models.user import User, UserRole
 from app.models.schedule import Schedule
+from app.models.test_session import TestSession, SessionStatus
 
 __all__ = [
     "Base",
@@ -24,4 +25,6 @@ __all__ = [
     "User",
     "UserRole",
     "Schedule",
+    "TestSession",
+    "SessionStatus",
 ]

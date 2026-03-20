@@ -317,7 +317,7 @@ export interface UserInfo {
   name: string
   picture_url: string | null
   workspace_domain: string
-  role: string
+  role: 'admin' | 'user'
   is_active: boolean
   created_at: string
   last_login: string | null
@@ -426,4 +426,188 @@ export async function runScheduleNow(id: string): Promise<{ message: string; sch
 export async function describeCron(expression: string): Promise<CronDescription> {
   const response = await api.get('/schedules/cron/describe', { params: { expression } })
   return response.data
+}
+
+// =============================================================================
+// Test Sessions (Interactive Testing Mode)
+// =============================================================================
+
+export interface TestSession {
+  id: string
+  status: 'active' | 'paused' | 'completed' | 'terminated'
+  browser_type: string
+  environment_name: string
+  environment_base_url: string
+  scenario_name: string | null
+  current_step_index: number
+  total_steps: number
+  started_at: string
+  last_activity: string
+  websocket_url: string
+}
+
+export interface TestSessionCreate {
+  scenario_id?: string
+  environment_id: string
+  browser_type?: string
+}
+
+export interface StepExecuteResponse {
+  step_name: string
+  status: 'passed' | 'failed' | 'skipped' | 'error' | 'completed'
+  duration_ms: number
+  error_message: string | null
+  screenshot_base64: string | null
+  current_url: string | null
+  page_title: string | null
+  next_step_index: number
+  total_steps: number
+}
+
+export interface SessionStatusResponse {
+  id: string
+  status: string
+  current_step_index: number
+  total_steps: number
+  current_url: string | null
+  page_title: string | null
+  step_results: Array<{
+    step_index: number
+    step_name: string
+    status: string
+    duration_ms: number
+    error_message: string | null
+    executed_at: string
+  }>
+  logs: string[]
+}
+
+export interface LoadScenarioResponse {
+  steps: Array<{
+    index: number
+    keyword: string
+    text: string
+    full: string
+    status: string
+  }>
+  total_steps: number
+}
+
+export interface ScreenshotResponse {
+  screenshot_base64: string
+  current_url: string | null
+  page_title: string | null
+}
+
+/**
+ * Start a new interactive test session
+ */
+export async function startTestSession(data: TestSessionCreate): Promise<TestSession> {
+  const response = await api.post('/test-session/start', data)
+  return response.data
+}
+
+/**
+ * List all test sessions
+ */
+export async function listTestSessions(activeOnly: boolean = true): Promise<TestSession[]> {
+  const response = await api.get('/test-sessions', { params: { active_only: activeOnly } })
+  return response.data
+}
+
+/**
+ * Load a scenario into an active session
+ */
+export async function loadScenarioIntoSession(
+  sessionId: string,
+  data: { scenario_id?: string; content?: string }
+): Promise<LoadScenarioResponse> {
+  const response = await api.post(`/test-session/${sessionId}/load-scenario`, data)
+  return response.data
+}
+
+/**
+ * Execute the next step in a test session
+ */
+export async function executeStep(
+  sessionId: string,
+  stepIndex?: number
+): Promise<StepExecuteResponse> {
+  const response = await api.post(`/test-session/${sessionId}/step`, { step_index: stepIndex })
+  return response.data
+}
+
+/**
+ * Skip the current step
+ */
+export async function skipStep(sessionId: string): Promise<StepExecuteResponse> {
+  const response = await api.post(`/test-session/${sessionId}/skip`)
+  return response.data
+}
+
+/**
+ * Take a screenshot
+ */
+export async function takeScreenshot(sessionId: string): Promise<ScreenshotResponse> {
+  const response = await api.post(`/test-session/${sessionId}/screenshot`)
+  return response.data
+}
+
+/**
+ * Get session status
+ */
+export async function getSessionStatus(sessionId: string): Promise<SessionStatusResponse> {
+  const response = await api.get(`/test-session/${sessionId}/status`)
+  return response.data
+}
+
+/**
+ * Navigate to a URL
+ */
+export async function navigateSession(
+  sessionId: string,
+  url: string
+): Promise<StepExecuteResponse> {
+  const response = await api.post(`/test-session/${sessionId}/navigate`, { url })
+  return response.data
+}
+
+/**
+ * Run a custom browser action
+ */
+export async function runCustomAction(
+  sessionId: string,
+  action: string,
+  selector?: string,
+  value?: string
+): Promise<StepExecuteResponse> {
+  const response = await api.post(`/test-session/${sessionId}/action`, {
+    action,
+    selector: selector || '',
+    value: value || '',
+  })
+  return response.data
+}
+
+/**
+ * Pause a test session
+ */
+export async function pauseSession(sessionId: string): Promise<{ status: string; session_id: string }> {
+  const response = await api.post(`/test-session/${sessionId}/pause`)
+  return response.data
+}
+
+/**
+ * Resume a paused test session
+ */
+export async function resumeSession(sessionId: string): Promise<{ status: string; session_id: string }> {
+  const response = await api.post(`/test-session/${sessionId}/resume`)
+  return response.data
+}
+
+/**
+ * End a test session
+ */
+export async function endTestSession(sessionId: string): Promise<void> {
+  await api.delete(`/test-session/${sessionId}`)
 }

@@ -6,6 +6,7 @@ interface NavItem {
   name: string
   path: string
   adminOnly?: boolean
+  highlight?: boolean
 }
 
 const navigation: NavItem[] = [
@@ -13,6 +14,7 @@ const navigation: NavItem[] = [
   { name: 'Scenarios', path: '/scenarios' },
   { name: 'Custom Steps', path: '/custom-steps' },
   { name: 'Test Runs', path: '/runs' },
+  { name: 'Test Mode', path: '/test-mode', highlight: true },
   { name: 'Schedules', path: '/schedules' },
   { name: 'Environments', path: '/environments' },
   { name: 'Repos', path: '/repos' },
@@ -53,6 +55,11 @@ export default function Layout() {
             >
               <span className="flex items-center gap-2">
                 {item.name}
+                {item.highlight && (
+                  <span className="text-xs bg-blue-500/20 text-blue-400 px-1.5 py-0.5 rounded">
+                    Interactive
+                  </span>
+                )}
                 {item.adminOnly && (
                   <span className="text-xs bg-purple-500/20 text-purple-400 px-1.5 py-0.5 rounded">
                     Admin

@@ -1,0 +1,25 @@
+{
+  "name": "sliples-e2e",
+  "version": "1.0.0",
+  "description": "E2E tests for Sliples UI using Playwright",
+  "private": true,
+  "scripts": {
+    "test": "playwright test",
+    "test:headed": "playwright test --headed",
+    "test:debug": "playwright test --debug",
+    "test:ui": "playwright test --ui",
+    "test:chromium": "playwright test --project=chromium",
+    "test:firefox": "playwright test --project=firefox",
+    "test:auth": "playwright test tests/auth.spec.ts",
+    "test:dashboard": "playwright test tests/dashboard.spec.ts",
+    "test:scenarios": "playwright test tests/scenarios.spec.ts",
+    "test:runs": "playwright test tests/test-runs.spec.ts",
+    "test:settings": "playwright test tests/settings.spec.ts",
+    "report": "playwright show-report",
+    "codegen": "playwright codegen https://sliples.localhost.in:5173"
+  },
+  "devDependencies": {
+    "@playwright/test": "^1.42.0",
+    "@types/node": "^20.11.0"
+  }
+}

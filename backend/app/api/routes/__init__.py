@@ -9,7 +9,9 @@ from app.api.routes import (
     runs,
     scenarios,
     schedules,
+    seed,
     steps,
+    test_session,
     users,
 )
 
@@ -22,6 +24,8 @@ __all__ = [
     "runs",
     "scenarios",
     "schedules",
+    "seed",
     "steps",
+    "test_session",
     "users",
 ]
