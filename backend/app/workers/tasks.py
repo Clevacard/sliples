@@ -157,6 +157,15 @@ def execute_test_run(self, run_id: str):
 
         logger.info(f"Test run {run_id} completed with status {run.status.value}")
 
+        # Generate HTML report
+        try:
+            from app.services.report_generator import ReportGenerator
+            report_generator = ReportGenerator(db)
+            report_generator.save_report(run_id)
+            logger.info(f"Generated report for test run {run_id}")
+        except Exception as e:
+            logger.error(f"Failed to generate report for {run_id}: {e}")
+
         return {
             "success": True,
             "run_id": run_id,
