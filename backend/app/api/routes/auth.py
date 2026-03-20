@@ -247,13 +247,13 @@ class AuthCallbackResponse(BaseModel):
     token: TokenResponse
 
 
-@router.get("/auth/google/login", response_model=GoogleLoginResponse)
-async def google_login(request: Request):
+@router.get("/auth/google/login")
+async def google_login(request: Request, redirect: bool = True):
     """
     Initiate Google OAuth2 login flow.
 
-    Returns the Google authorization URL that the frontend should redirect to.
-    The state parameter should be stored (e.g., in a cookie) for CSRF verification.
+    By default, redirects directly to Google for authentication.
+    If redirect=false, returns the authorization URL as JSON for frontend use.
     """
     settings = get_settings()
 
@@ -265,6 +265,14 @@ async def google_login(request: Request):
 
     authorization_url, state = get_authorization_url()
 
+    if redirect:
+        # Direct redirect to Google
+        return RedirectResponse(
+            url=authorization_url,
+            status_code=status.HTTP_302_FOUND,
+        )
+
+    # Return JSON for programmatic use
     return GoogleLoginResponse(
         authorization_url=authorization_url,
         state=state,
@@ -310,7 +318,9 @@ async def google_callback(
 
         # Verify workspace domain
         allowed_domains = settings.allowed_workspace_domains_list
+        print(f"DEBUG: User email={google_user.email}, allowed_domains={allowed_domains}")
         if allowed_domains and not verify_workspace_domain(google_user.email, allowed_domains):
+            print(f"DEBUG: Domain rejected for {google_user.email}")
             return RedirectResponse(
                 url=f"{settings.frontend_url}/login?error=domain_not_allowed",
                 status_code=status.HTTP_302_FOUND,
@@ -329,7 +339,7 @@ async def google_callback(
             # Create new user
             # First user becomes admin
             user_count = db.query(User).count()
-            role = UserRole.ADMIN if user_count == 0 else UserRole.USER
+            role = UserRole.admin if user_count == 0 else UserRole.user
 
             user = User(
                 email=google_user.email,
@@ -369,11 +379,15 @@ async def google_callback(
         return response
 
     except GoogleAuthError as e:
+        print(f"DEBUG: GoogleAuthError: {e.message}")
         return RedirectResponse(
             url=f"{settings.frontend_url}/login?error={e.message}",
             status_code=status.HTTP_302_FOUND,
         )
     except Exception as e:
+        import traceback
+        print(f"DEBUG: Exception: {e}")
+        traceback.print_exc()
         return RedirectResponse(
             url=f"{settings.frontend_url}/login?error=authentication_failed",
             status_code=status.HTTP_302_FOUND,

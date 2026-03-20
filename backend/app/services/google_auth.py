@@ -69,11 +69,8 @@ def get_authorization_url(state: Optional[str] = None) -> tuple[str, str]:
         "prompt": "select_account",  # Always show account selector
     }
 
-    # Add hd (hosted domain) parameter if workspace domains are configured
-    # This hints to Google to show only accounts from these domains
-    allowed_domains = settings.allowed_workspace_domains_list
-    if allowed_domains and len(allowed_domains) == 1:
-        params["hd"] = allowed_domains[0]
+    # Note: We don't set the 'hd' parameter here to allow users to select
+    # any Google account. Domain validation happens server-side after auth.
 
     authorization_url = f"{GOOGLE_AUTH_URL}?{urlencode(params)}"
     return authorization_url, state

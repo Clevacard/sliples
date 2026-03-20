@@ -206,7 +206,7 @@ async def get_current_admin_user(
     """
     from app.models.user import UserRole
 
-    if current_user.role != UserRole.ADMIN:
+    if current_user.role != UserRole.admin:
         raise HTTPException(
             status_code=status.HTTP_403_FORBIDDEN,
             detail="Admin access required",

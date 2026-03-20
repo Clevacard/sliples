@@ -12,8 +12,8 @@ from app.database import Base
 
 class UserRole(str, Enum):
     """User role enumeration."""
-    ADMIN = "admin"
-    USER = "user"
+    admin = "admin"
+    user = "user"
 
 
 class User(Base):
@@ -28,7 +28,7 @@ class User(Base):
     google_id = Column(String(255), unique=True, nullable=False, index=True)
     workspace_domain = Column(String(255), nullable=False)
     is_active = Column(Boolean, default=True, nullable=False)
-    role = Column(SQLEnum(UserRole), default=UserRole.USER, nullable=False)
+    role = Column(SQLEnum(UserRole), default=UserRole.user, nullable=False)
     created_at = Column(DateTime, default=datetime.utcnow, nullable=False)
     last_login = Column(DateTime, nullable=True)
 
