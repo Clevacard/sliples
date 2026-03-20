@@ -39,6 +39,7 @@ class StepResponse(BaseModel):
         from_attributes = True
 
 
+@router.get("/steps", response_model=list[StepResponse])
 @router.get("/steps/custom", response_model=list[StepResponse])
 async def list_custom_steps(
     repo_id: Optional[UUID] = None,

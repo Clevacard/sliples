@@ -276,7 +276,7 @@ async def create_schedule(
         browsers=schedule.browsers,
         enabled=schedule.enabled,
         next_run_at=next_run,
-        created_by=api_key,  # Store API key name as creator
+        created_by=auth.email if hasattr(auth, 'email') else (str(auth)[:50] if auth else None),
     )
     db.add(db_schedule)
     db.commit()
