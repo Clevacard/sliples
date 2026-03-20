@@ -194,15 +194,22 @@ async def get_screenshot(
     """
     Get a screenshot by its S3 path.
 
-    Returns a redirect to a presigned S3 URL.
+    Streams the image directly from S3/MinIO storage.
     """
-    from fastapi.responses import RedirectResponse
+    from fastapi.responses import StreamingResponse
     from app.services.s3_service import S3Service
+    import io
 
     try:
         s3 = S3Service()
-        presigned_url = s3.get_presigned_url(path, expires_in=3600)
-        return RedirectResponse(url=presigned_url, status_code=302)
+        response = s3.client.get_object(Bucket=s3.bucket, Key=path)
+        return StreamingResponse(
+            response['Body'],
+            media_type="image/png",
+            headers={
+                "Cache-Control": "public, max-age=86400",  # Cache for 24 hours
+            }
+        )
     except Exception as e:
         raise HTTPException(status_code=404, detail=f"Screenshot not found: {str(e)}")
 
