@@ -63,6 +63,16 @@ services:
       S3_SECRET_KEY: sliples_dev
       SECRET_KEY: dev-secret-key-change-in-prod
       ALLOWED_ORIGINS: http://localhost:5173,http://localhost:3000
+      # Google OAuth2 / Workspace SSO
+      GOOGLE_CLIENT_ID: ${GOOGLE_CLIENT_ID:-}
+      GOOGLE_CLIENT_SECRET: ${GOOGLE_CLIENT_SECRET:-}
+      GOOGLE_REDIRECT_URI: http://localhost:8000/api/v1/auth/google/callback
+      ALLOWED_WORKSPACE_DOMAINS: ${ALLOWED_WORKSPACE_DOMAINS:-}
+      # JWT Settings
+      JWT_SECRET_KEY: ${JWT_SECRET_KEY:-jwt-dev-secret-change-in-prod}
+      JWT_ALGORITHM: HS256
+      JWT_EXPIRY_HOURS: "24"
+      FRONTEND_URL: http://localhost:5173
     ports:
       - "8000:8000"
     volumes:

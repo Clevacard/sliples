@@ -1,4 +1,5 @@
 import { Outlet, NavLink } from 'react-router-dom'
+import UserMenu from './UserMenu'
 
 const navigation = [
   { name: 'Dashboard', path: '/dashboard' },
@@ -43,11 +44,19 @@ export default function Layout() {
       </aside>
 
       {/* Main content */}
-      <main className="flex-1 overflow-auto">
-        <div className="p-8">
-          <Outlet />
-        </div>
-      </main>
+      <div className="flex-1 flex flex-col overflow-hidden">
+        {/* Header with user menu */}
+        <header className="h-14 bg-gray-800 border-b border-gray-700 flex items-center justify-end px-6">
+          <UserMenu />
+        </header>
+
+        {/* Page content */}
+        <main className="flex-1 overflow-auto">
+          <div className="p-8">
+            <Outlet />
+          </div>
+        </main>
+      </div>
     </div>
   )
 }

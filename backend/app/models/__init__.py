@@ -6,6 +6,7 @@ from app.models.environment import Environment, BrowserConfig
 from app.models.test_run import TestRun, TestResult, RunStatus, StepStatus
 from app.models.api_key import ApiKey
 from app.models.custom_step import CustomStep
+from app.models.user import User, UserRole
 
 __all__ = [
     "Base",
@@ -19,4 +20,6 @@ __all__ = [
     "StepStatus",
     "ApiKey",
     "CustomStep",
+    "User",
+    "UserRole",
 ]
