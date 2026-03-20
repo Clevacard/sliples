@@ -43,6 +43,18 @@ class AllTagsResponse(BaseModel):
     count: int
 
 
+class ScenarioContentUpdate(BaseModel):
+    content: str
+
+
+class ScenarioCreate(BaseModel):
+    name: str
+    feature_path: str
+    content: str
+    tags: list[str] = []
+    repo_id: Optional[UUID] = None
+
+
 @router.get("/scenarios/tags", response_model=AllTagsResponse)
 async def list_all_tags(
     db: Session = Depends(get_db),
@@ -129,6 +141,66 @@ async def get_scenario_content(
         "feature_path": scenario.feature_path,
         "content": scenario.content or "",
     }
+
+
+@router.put("/scenarios/{scenario_id}/content", response_model=ScenarioDetail)
+async def update_scenario_content(
+    scenario_id: UUID,
+    update: ScenarioContentUpdate,
+    db: Session = Depends(get_db),
+    auth = Depends(get_api_key_or_user),
+):
+    """Update the content (Gherkin text) of a scenario."""
+    scenario = db.query(Scenario).filter(Scenario.id == scenario_id).first()
+    if not scenario:
+        raise HTTPException(status_code=404, detail="Scenario not found")
+
+    scenario.content = update.content
+    db.commit()
+    db.refresh(scenario)
+    return scenario
+
+
+@router.post("/scenarios", response_model=ScenarioDetail, status_code=201)
+async def create_scenario(
+    scenario_data: ScenarioCreate,
+    db: Session = Depends(get_db),
+    auth = Depends(get_api_key_or_user),
+):
+    """Create a new scenario."""
+    # Check if repo exists (if repo_id is provided)
+    if scenario_data.repo_id:
+        repo = db.query(ScenarioRepo).filter(ScenarioRepo.id == scenario_data.repo_id).first()
+        if not repo:
+            raise HTTPException(status_code=404, detail="Repository not found")
+
+    scenario = Scenario(
+        name=scenario_data.name,
+        feature_path=scenario_data.feature_path,
+        content=scenario_data.content,
+        tags=scenario_data.tags,
+        repo_id=scenario_data.repo_id,
+    )
+    db.add(scenario)
+    db.commit()
+    db.refresh(scenario)
+    return scenario
+
+
+@router.delete("/scenarios/{scenario_id}", status_code=204)
+async def delete_scenario(
+    scenario_id: UUID,
+    db: Session = Depends(get_db),
+    auth = Depends(get_api_key_or_user),
+):
+    """Delete a scenario."""
+    scenario = db.query(Scenario).filter(Scenario.id == scenario_id).first()
+    if not scenario:
+        raise HTTPException(status_code=404, detail="Scenario not found")
+
+    db.delete(scenario)
+    db.commit()
+    return None
 
 
 @router.post("/scenarios/sync")
