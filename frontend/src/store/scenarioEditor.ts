@@ -38,6 +38,7 @@ interface ScenarioEditorState {
   saving: boolean
   loadingTree: boolean
   error: string | null
+  successMessage: string | null
 
   // Actions
   loadFileTree: () => Promise<void>
@@ -52,6 +53,7 @@ interface ScenarioEditorState {
   resetContent: () => void
   clearFile: () => void
   clearError: () => void
+  clearSuccess: () => void
 }
 
 export const useScenarioEditorStore = create<ScenarioEditorState>((set, get) => ({
@@ -67,6 +69,7 @@ export const useScenarioEditorStore = create<ScenarioEditorState>((set, get) => 
   saving: false,
   loadingTree: false,
   error: null,
+  successMessage: null,
 
   // Actions
   loadFileTree: async () => {
@@ -210,13 +213,18 @@ export const useScenarioEditorStore = create<ScenarioEditorState>((set, get) => 
     const { currentFile, content } = get()
     if (!currentFile) return
 
-    set({ saving: true, error: null })
+    set({ saving: true, error: null, successMessage: null })
     try {
       await updateScenarioContent(currentFile.id, content)
       set({
         originalContent: content,
         isDirty: false,
+        successMessage: 'Scenario saved successfully',
       })
+      // Auto-clear success message after 3 seconds
+      setTimeout(() => {
+        set({ successMessage: null })
+      }, 3000)
     } catch (error) {
       const message = error instanceof Error ? error.message : 'Failed to save file'
       set({ error: message })
@@ -282,5 +290,9 @@ export const useScenarioEditorStore = create<ScenarioEditorState>((set, get) => 
 
   clearError: () => {
     set({ error: null })
+  },
+
+  clearSuccess: () => {
+    set({ successMessage: null })
   },
 }))

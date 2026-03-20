@@ -17,6 +17,7 @@ export default function ScenarioEditor() {
     loading,
     saving,
     error,
+    successMessage,
     loadFile,
     updateContent,
     saveFile,
@@ -24,6 +25,7 @@ export default function ScenarioEditor() {
     resetContent,
     clearFile,
     clearError,
+    clearSuccess,
   } = useScenarioEditorStore()
 
   // Load file if ID is provided in URL
@@ -81,6 +83,23 @@ export default function ScenarioEditor() {
 
   return (
     <div className="flex flex-col h-[calc(100vh-7rem)]">
+      {/* Success banner */}
+      {successMessage && (
+        <div className="bg-green-900/50 border border-green-700 text-green-200 px-4 py-2 flex items-center justify-between">
+          <div className="flex items-center gap-2">
+            <svg className="w-5 h-5" fill="none" stroke="currentColor" viewBox="0 0 24 24">
+              <path strokeLinecap="round" strokeLinejoin="round" strokeWidth={2} d="M5 13l4 4L19 7" />
+            </svg>
+            <span>{successMessage}</span>
+          </div>
+          <button onClick={clearSuccess} className="text-green-400 hover:text-green-300">
+            <svg className="w-5 h-5" fill="none" stroke="currentColor" viewBox="0 0 24 24">
+              <path strokeLinecap="round" strokeLinejoin="round" strokeWidth={2} d="M6 18L18 6M6 6l12 12" />
+            </svg>
+          </button>
+        </div>
+      )}
+
       {/* Error banner */}
       {error && (
         <div className="bg-red-900/50 border border-red-700 text-red-200 px-4 py-2 flex items-center justify-between">
