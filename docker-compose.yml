@@ -1,0 +1,159 @@
+services:
+  # PostgreSQL Database
+  postgres:
+    image: postgres:16-alpine
+    container_name: sliples-postgres
+    environment:
+      POSTGRES_USER: sliples
+      POSTGRES_PASSWORD: sliples_dev
+      POSTGRES_DB: sliples
+    ports:
+      - "5433:5432"
+    volumes:
+      - postgres_data:/var/lib/postgresql/data
+    healthcheck:
+      test: ["CMD-SHELL", "pg_isready -U sliples"]
+      interval: 5s
+      timeout: 5s
+      retries: 5
+
+  # Redis for Celery
+  redis:
+    image: redis:7-alpine
+    container_name: sliples-redis
+    ports:
+      - "6380:6379"
+    healthcheck:
+      test: ["CMD", "redis-cli", "ping"]
+      interval: 5s
+      timeout: 5s
+      retries: 5
+
+  # MinIO (S3-compatible storage for screenshots)
+  minio:
+    image: minio/minio:latest
+    container_name: sliples-minio
+    command: server /data --console-address ":9001"
+    environment:
+      MINIO_ROOT_USER: sliples
+      MINIO_ROOT_PASSWORD: sliples_dev
+    ports:
+      - "9000:9000"
+      - "9001:9001"
+    volumes:
+      - minio_data:/data
+    healthcheck:
+      test: ["CMD", "mc", "ready", "local"]
+      interval: 5s
+      timeout: 5s
+      retries: 5
+
+  # Backend API
+  backend:
+    build:
+      context: ./backend
+      dockerfile: Dockerfile
+    container_name: sliples-backend
+    environment:
+      DATABASE_URL: postgresql://sliples:sliples_dev@postgres:5432/sliples
+      REDIS_URL: redis://redis:6379/0
+      S3_ENDPOINT: http://minio:9000
+      S3_BUCKET: sliples-screenshots
+      S3_ACCESS_KEY: sliples
+      S3_SECRET_KEY: sliples_dev
+      SECRET_KEY: dev-secret-key-change-in-prod
+      ALLOWED_ORIGINS: http://localhost:5173,http://localhost:3000
+    ports:
+      - "8000:8000"
+    volumes:
+      - ./backend:/app
+      - ./scenarios:/app/scenarios:ro
+    depends_on:
+      postgres:
+        condition: service_healthy
+      redis:
+        condition: service_healthy
+    command: uvicorn app.main:app --host 0.0.0.0 --port 8000 --reload
+
+  # Celery Worker
+  worker:
+    build:
+      context: ./backend
+      dockerfile: Dockerfile
+    container_name: sliples-worker
+    environment:
+      DATABASE_URL: postgresql://sliples:sliples_dev@postgres:5432/sliples
+      REDIS_URL: redis://redis:6379/0
+      S3_ENDPOINT: http://minio:9000
+      S3_BUCKET: sliples-screenshots
+      S3_ACCESS_KEY: sliples
+      S3_SECRET_KEY: sliples_dev
+    volumes:
+      - ./backend:/app
+      - ./scenarios:/app/scenarios:ro
+      - ./runner:/app/runner:ro
+    depends_on:
+      postgres:
+        condition: service_healthy
+      redis:
+        condition: service_healthy
+    command: celery -A app.workers.celery_app worker --loglevel=info --concurrency=4
+
+  # Celery Beat (Scheduler)
+  beat:
+    build:
+      context: ./backend
+      dockerfile: Dockerfile
+    container_name: sliples-beat
+    environment:
+      DATABASE_URL: postgresql://sliples:sliples_dev@postgres:5432/sliples
+      REDIS_URL: redis://redis:6379/0
+    volumes:
+      - ./backend:/app
+    depends_on:
+      postgres:
+        condition: service_healthy
+      redis:
+        condition: service_healthy
+    command: celery -A app.workers.celery_app beat --loglevel=info
+
+  # Frontend
+  frontend:
+    build:
+      context: ./frontend
+      dockerfile: Dockerfile
+      target: development
+    container_name: sliples-frontend
+    environment:
+      VITE_API_URL: http://localhost:8000
+      DOCKER_ENV: "true"
+    ports:
+      - "5173:5173"
+    volumes:
+      - ./frontend:/app
+      - /app/node_modules
+    command: npm run dev -- --host
+
+  # Playwright Browser (Chrome)
+  browser-chrome:
+    image: mcr.microsoft.com/playwright:v1.42.0-jammy
+    container_name: sliples-browser-chrome
+    command: npx playwright run-server --port 3000
+    ports:
+      - "3001:3000"
+    shm_size: 2gb
+
+  # Playwright Browser (Firefox)
+  browser-firefox:
+    image: mcr.microsoft.com/playwright:v1.42.0-jammy
+    container_name: sliples-browser-firefox
+    environment:
+      BROWSER: firefox
+    command: npx playwright run-server --port 3000
+    ports:
+      - "3002:3000"
+    shm_size: 2gb
+
+volumes:
+  postgres_data:
+  minio_data:
