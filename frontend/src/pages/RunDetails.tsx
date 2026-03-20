@@ -3,6 +3,17 @@ import { useParams, useNavigate } from 'react-router-dom'
 import { useTestRunsStore, TestResult } from '../store/testRuns'
 import Modal from '../components/Modal'
 
+const API_URL = import.meta.env.VITE_API_URL || ''
+
+// Helper to construct screenshot URL from S3 path
+const getScreenshotUrl = (path: string) => {
+  if (!path) return ''
+  // If it's already a full URL, return as-is
+  if (path.startsWith('http://') || path.startsWith('https://')) return path
+  // Otherwise, construct the API URL
+  return `${API_URL}/api/v1/screenshots/${path}`
+}
+
 // Status icons
 const StatusIcon = ({ status, size = 'sm' }: { status: string; size?: 'sm' | 'md' }) => {
   const sizeClass = size === 'md' ? 'w-5 h-5' : 'w-4 h-4'
@@ -391,7 +402,7 @@ export default function RunDetails() {
                         <button
                           onClick={(e) => {
                             e.stopPropagation()
-                            setSelectedScreenshot(result.screenshot_url!)
+                            setSelectedScreenshot(getScreenshotUrl(result.screenshot_url!))
                           }}
                           className="p-1.5 bg-gray-700 hover:bg-gray-600 rounded transition-colors"
                           title="View screenshot"
@@ -429,11 +440,11 @@ export default function RunDetails() {
                         <div>
                           <p className="text-xs text-gray-500 uppercase tracking-wide mb-2">Screenshot</p>
                           <button
-                            onClick={() => setSelectedScreenshot(result.screenshot_url!)}
+                            onClick={() => setSelectedScreenshot(getScreenshotUrl(result.screenshot_url!))}
                             className="block"
                           >
                             <img
-                              src={result.screenshot_url}
+                              src={getScreenshotUrl(result.screenshot_url!)}
                               alt="Step screenshot"
                               className="max-w-xs rounded-lg border border-gray-700 hover:border-blue-500 transition-colors cursor-pointer"
                             />

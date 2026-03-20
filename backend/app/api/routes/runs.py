@@ -186,6 +186,27 @@ async def cancel_run(
     db.commit()
 
 
+@router.get("/screenshots/{path:path}")
+async def get_screenshot(
+    path: str,
+    auth = Depends(get_api_key_or_user),
+):
+    """
+    Get a screenshot by its S3 path.
+
+    Returns a redirect to a presigned S3 URL.
+    """
+    from fastapi.responses import RedirectResponse
+    from app.services.s3_service import S3Service
+
+    try:
+        s3 = S3Service()
+        presigned_url = s3.get_presigned_url(path, expires_in=3600)
+        return RedirectResponse(url=presigned_url, status_code=302)
+    except Exception as e:
+        raise HTTPException(status_code=404, detail=f"Screenshot not found: {str(e)}")
+
+
 @router.get("/runs/{run_id}/report")
 async def get_run_report(
     run_id: UUID,
