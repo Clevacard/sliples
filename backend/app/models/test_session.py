@@ -4,8 +4,8 @@ import uuid
 from datetime import datetime
 from enum import Enum
 
-from sqlalchemy import Column, String, DateTime, ForeignKey, Text, Enum as SQLEnum
-from sqlalchemy.dialects.postgresql import UUID, JSONB
+from sqlalchemy import Column, String, DateTime, ForeignKey, Text
+from sqlalchemy.dialects.postgresql import UUID, JSONB, ENUM as PgEnum
 from sqlalchemy.orm import relationship
 
 from app.database import Base
@@ -29,7 +29,10 @@ class TestSession(Base):
     user_id = Column(UUID(as_uuid=True), ForeignKey("users.id"), nullable=True)
     scenario_id = Column(UUID(as_uuid=True), ForeignKey("scenarios.id"), nullable=True)
     environment_id = Column(UUID(as_uuid=True), ForeignKey("environments.id"), nullable=False)
-    status = Column(SQLEnum(SessionStatus), default=SessionStatus.ACTIVE)
+    status = Column(
+        PgEnum('active', 'paused', 'completed', 'terminated', name='sessionstatus', create_type=False),
+        default='active'
+    )
     browser_type = Column(String(50), default="chromium")
     current_step_index = Column(String(50), default="0")
     started_at = Column(DateTime, default=datetime.utcnow)

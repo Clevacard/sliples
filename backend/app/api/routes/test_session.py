@@ -9,7 +9,7 @@ from sqlalchemy.orm import Session
 from pydantic import BaseModel
 
 from app.database import get_db
-from app.models import Environment, Scenario, TestSession, SessionStatus, User
+from app.models import Environment, Scenario, TestSession, User
 from app.api.deps import get_api_key_or_user
 from app.services.interactive_executor import InteractiveExecutor, StepExecutionResult
 
@@ -157,7 +157,7 @@ async def start_test_session(
         user_id=_get_user_id(auth),
         scenario_id=request.scenario_id,
         environment_id=request.environment_id,
-        status=SessionStatus.ACTIVE,
+        status='active',
         browser_type=request.browser_type,
     )
     db.add(db_session)
@@ -442,7 +442,7 @@ async def pause_session(
     # Update database
     db_session = db.query(TestSession).filter(TestSession.id == session_id).first()
     if db_session:
-        db_session.status = SessionStatus.PAUSED
+        db_session.status = 'paused'
         db_session.last_activity = datetime.utcnow()
         db.commit()
 
@@ -465,7 +465,7 @@ async def resume_session(
     # Update database
     db_session = db.query(TestSession).filter(TestSession.id == session_id).first()
     if db_session:
-        db_session.status = SessionStatus.ACTIVE
+        db_session.status = 'active'
         db_session.last_activity = datetime.utcnow()
         db.commit()
 
@@ -489,7 +489,7 @@ async def end_test_session(
     # Update database
     db_session = db.query(TestSession).filter(TestSession.id == session_id).first()
     if db_session:
-        db_session.status = SessionStatus.TERMINATED
+        db_session.status = 'terminated'
         db_session.completed_at = datetime.utcnow()
         db_session.last_activity = datetime.utcnow()
         db.commit()
@@ -508,7 +508,7 @@ async def list_test_sessions(
     query = db.query(TestSession).order_by(TestSession.started_at.desc())
 
     if active_only:
-        query = query.filter(TestSession.status.in_([SessionStatus.ACTIVE, SessionStatus.PAUSED]))
+        query = query.filter(TestSession.status.in_(['active', 'paused']))
 
     sessions = query.limit(50).all()
 
