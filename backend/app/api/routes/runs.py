@@ -115,11 +115,16 @@ async def create_run(
                 detail=f"No scenarios found matching tags: {run.scenario_tags}",
             )
 
+    # If no scenario_ids or tags provided, run ALL scenarios
     if not scenario_ids:
-        raise HTTPException(
-            status_code=400,
-            detail="Must provide either scenario_ids or scenario_tags",
-        )
+        scenarios = db.query(Scenario).all()
+        scenario_ids = [s.id for s in scenarios]
+
+        if not scenario_ids:
+            raise HTTPException(
+                status_code=400,
+                detail="No scenarios available. Import scenarios first.",
+            )
 
     # Calculate expiration date
     expires_at = datetime.utcnow() + timedelta(days=env.retention_days)
