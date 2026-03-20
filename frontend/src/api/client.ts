@@ -26,18 +26,53 @@ export async function checkHealth() {
 }
 
 // Environments
-export async function getEnvironments() {
+export interface Environment {
+  id: string
+  name: string
+  base_url: string
+  credentials_env?: string
+  variables: Record<string, string>
+  retention_days: number
+  created_at?: string
+  updated_at?: string
+}
+
+export interface EnvironmentCreate {
+  name: string
+  base_url: string
+  variables?: Record<string, string>
+  retention_days?: number
+}
+
+export interface EnvironmentUpdate {
+  name?: string
+  base_url?: string
+  variables?: Record<string, string>
+  retention_days?: number
+}
+
+export async function getEnvironments(): Promise<Environment[]> {
   const response = await api.get('/environments')
   return response.data
 }
 
-export async function createEnvironment(data: {
-  name: string
-  base_url: string
-  variables?: Record<string, string>
-}) {
+export async function getEnvironment(id: string): Promise<Environment> {
+  const response = await api.get(`/environments/${id}`)
+  return response.data
+}
+
+export async function createEnvironment(data: EnvironmentCreate): Promise<Environment> {
   const response = await api.post('/environments', data)
   return response.data
+}
+
+export async function updateEnvironment(id: string, data: EnvironmentUpdate): Promise<Environment> {
+  const response = await api.put(`/environments/${id}`, data)
+  return response.data
+}
+
+export async function deleteEnvironment(id: string): Promise<void> {
+  await api.delete(`/environments/${id}`)
 }
 
 // Scenarios
@@ -172,4 +207,35 @@ export async function getRepoDetails(id: string) {
 export async function syncAllRepos() {
   const repos = await getRepos()
   return Promise.all(repos.map((repo: { id: string }) => syncRepo(repo.id)))
+}
+
+// API Keys
+export interface ApiKey {
+  id: string
+  name: string
+  key_prefix: string
+  created_at: string
+  last_used_at: string | null
+}
+
+export interface CreateApiKeyResponse {
+  id: string
+  name: string
+  key: string  // Full key, only shown once
+  key_prefix: string
+  created_at: string
+}
+
+export async function listApiKeys(): Promise<ApiKey[]> {
+  const response = await api.get('/auth/keys')
+  return response.data
+}
+
+export async function createApiKey(name: string): Promise<CreateApiKeyResponse> {
+  const response = await api.post('/auth/keys', { name })
+  return response.data
+}
+
+export async function revokeApiKey(id: string): Promise<void> {
+  await api.delete(`/auth/keys/${id}`)
 }
