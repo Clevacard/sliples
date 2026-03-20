@@ -8,12 +8,17 @@ interface ProtectedRouteProps {
 
 export default function ProtectedRoute({ children }: ProtectedRouteProps) {
   const location = useLocation()
-  const { isAuthenticated, isLoading, fetchCurrentUser } = useAuthStore()
+  const { isAuthenticated, isLoading, user, fetchCurrentUser } = useAuthStore()
 
-  // Check authentication on mount
+  // Check authentication on mount, but skip if we have an API key
+  // (API key auth doesn't use /auth/me endpoint)
   useEffect(() => {
-    fetchCurrentUser()
-  }, [fetchCurrentUser])
+    const hasApiKey = !!localStorage.getItem('sliples_api_key')
+    // Only fetch current user if we don't have a user and don't have an API key
+    if (!user && !hasApiKey) {
+      fetchCurrentUser()
+    }
+  }, [fetchCurrentUser, user])
 
   // Show loading spinner while checking auth
   if (isLoading) {

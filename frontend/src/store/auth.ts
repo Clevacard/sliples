@@ -83,6 +83,14 @@ export const useAuthStore = create<AuthState>()(
 
       // Fetch current user (check session)
       fetchCurrentUser: async () => {
+        const currentState = get()
+        // If we already have a user from persisted state, just mark as not loading
+        // This avoids clearing valid auth on temporary network/cookie issues
+        if (currentState.user && currentState.isAuthenticated) {
+          set({ isLoading: false })
+          return
+        }
+
         set({ isLoading: true })
         try {
           const user = await authApi.getCurrentUser()
