@@ -45,9 +45,9 @@ class Settings(BaseSettings):
     # Frontend URL for OAuth redirects
     frontend_url: str = "http://localhost:5173"
 
-    # Browsers
-    browser_chrome_url: str = "ws://localhost:3001"
-    browser_firefox_url: str = "ws://localhost:3002"
+    # Browsers (Docker internal: browser-chrome:3000, host: localhost:3001)
+    browser_chrome_url: str = "ws://browser-chrome:3000"
+    browser_firefox_url: str = "ws://browser-firefox:3000"
 
     # Retention
     retention_days: int = 365

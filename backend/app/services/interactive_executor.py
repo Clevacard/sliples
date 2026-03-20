@@ -131,6 +131,16 @@ class InteractiveSession:
         self._started_at = None
         self._status = "initializing"
 
+    def _get_browser_url(self) -> str:
+        """Get the WebSocket URL for the browser container."""
+        if self.browser_type in ("chromium", "chrome"):
+            return self.settings.browser_chrome_url
+        elif self.browser_type == "firefox":
+            return self.settings.browser_firefox_url
+        else:
+            # Default to Chrome for webkit or unknown types
+            return self.settings.browser_chrome_url
+
     @property
     def status(self) -> str:
         return self._status
@@ -152,12 +162,21 @@ class InteractiveSession:
         self._log("Starting browser session...")
         self._playwright = await async_playwright().start()
 
-        # Launch browser locally in headed mode for interactive testing
-        browser_launcher = getattr(self._playwright, self.browser_type)
-        self._browser = await browser_launcher.launch(
-            headless=self.headless,
-            slow_mo=100,  # Slow down for visibility
-        )
+        # Connect to remote browser container
+        browser_url = self._get_browser_url()
+        self._log(f"Connecting to browser at {browser_url}...")
+
+        try:
+            self._browser = await self._playwright.chromium.connect(browser_url)
+        except Exception as e:
+            self._log(f"Failed to connect to remote browser: {e}", "error")
+            # Fallback to local launch for development outside Docker
+            self._log("Falling back to local browser launch...")
+            browser_launcher = getattr(self._playwright, self.browser_type)
+            self._browser = await browser_launcher.launch(
+                headless=self.headless,
+                slow_mo=100,
+            )
 
         self._context = await self._browser.new_context(
             viewport={"width": 1280, "height": 720},
