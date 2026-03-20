@@ -36,4 +36,8 @@ celery_app.conf.beat_schedule = {
         "task": "app.workers.scheduled.cleanup_orphaned_screenshots",
         "schedule": crontab(hour=3, minute=0),  # Daily at 3 AM
     },
+    "check-scheduled-runs": {
+        "task": "app.workers.scheduled.check_scheduled_runs",
+        "schedule": crontab(minute="*"),  # Every minute
+    },
 }

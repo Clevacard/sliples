@@ -1,0 +1,436 @@
+"""Schedule management endpoints."""
+
+from uuid import UUID
+from typing import Optional
+from datetime import datetime
+
+from fastapi import APIRouter, Depends, HTTPException, status
+from sqlalchemy.orm import Session
+from pydantic import BaseModel, Field, field_validator
+from croniter import croniter
+
+from app.database import get_db
+from app.models import Schedule, Environment, Scenario
+from app.api.deps import get_api_key
+
+router = APIRouter()
+
+
+def validate_cron_expression(cron: str) -> str:
+    """Validate that a cron expression is valid."""
+    try:
+        # Test if the cron expression is valid
+        croniter(cron, datetime.utcnow())
+        return cron
+    except (ValueError, KeyError) as e:
+        raise ValueError(f"Invalid cron expression: {e}")
+
+
+def calculate_next_run(cron_expression: str, base_time: datetime = None) -> datetime:
+    """Calculate the next run time from a cron expression."""
+    if base_time is None:
+        base_time = datetime.utcnow()
+    cron = croniter(cron_expression, base_time)
+    return cron.get_next(datetime)
+
+
+def get_cron_description(cron_expression: str) -> str:
+    """Generate a human-readable description of a cron expression."""
+    parts = cron_expression.split()
+    if len(parts) != 5:
+        return cron_expression
+
+    minute, hour, day, month, weekday = parts
+
+    # Common patterns
+    if cron_expression == "0 * * * *":
+        return "Every hour"
+    if cron_expression == "*/15 * * * *":
+        return "Every 15 minutes"
+    if cron_expression == "*/30 * * * *":
+        return "Every 30 minutes"
+    if cron_expression == "0 0 * * *":
+        return "Every day at midnight"
+    if cron_expression == "0 9 * * *":
+        return "Every day at 9:00 AM"
+    if cron_expression == "0 9 * * 1-5":
+        return "Weekdays at 9:00 AM"
+    if cron_expression == "0 0 * * 0":
+        return "Every Sunday at midnight"
+    if cron_expression == "0 0 1 * *":
+        return "First day of every month at midnight"
+
+    # Build description
+    desc_parts = []
+
+    # Minute
+    if minute == "*":
+        desc_parts.append("every minute")
+    elif minute.startswith("*/"):
+        desc_parts.append(f"every {minute[2:]} minutes")
+    elif minute == "0":
+        pass  # At the top of the hour
+    else:
+        desc_parts.append(f"at minute {minute}")
+
+    # Hour
+    if hour == "*":
+        if minute != "*":
+            desc_parts.append("every hour")
+    elif hour.startswith("*/"):
+        desc_parts.append(f"every {hour[2:]} hours")
+    else:
+        try:
+            h = int(hour)
+            am_pm = "AM" if h < 12 else "PM"
+            display_hour = h if h <= 12 else h - 12
+            if display_hour == 0:
+                display_hour = 12
+            desc_parts.append(f"at {display_hour}:{minute.zfill(2)} {am_pm}")
+        except ValueError:
+            desc_parts.append(f"at hour {hour}")
+
+    # Day of month
+    if day != "*":
+        if day == "1":
+            desc_parts.append("on the 1st")
+        elif day == "2":
+            desc_parts.append("on the 2nd")
+        elif day == "3":
+            desc_parts.append("on the 3rd")
+        else:
+            desc_parts.append(f"on day {day}")
+
+    # Month
+    month_names = {
+        "1": "January", "2": "February", "3": "March", "4": "April",
+        "5": "May", "6": "June", "7": "July", "8": "August",
+        "9": "September", "10": "October", "11": "November", "12": "December"
+    }
+    if month != "*":
+        desc_parts.append(f"in {month_names.get(month, f'month {month}')}")
+
+    # Day of week
+    day_names = {
+        "0": "Sunday", "1": "Monday", "2": "Tuesday", "3": "Wednesday",
+        "4": "Thursday", "5": "Friday", "6": "Saturday", "7": "Sunday"
+    }
+    if weekday != "*":
+        if weekday == "1-5":
+            desc_parts.append("on weekdays")
+        elif weekday == "0,6":
+            desc_parts.append("on weekends")
+        elif weekday in day_names:
+            desc_parts.append(f"on {day_names[weekday]}")
+        else:
+            desc_parts.append(f"on day {weekday}")
+
+    if desc_parts:
+        return " ".join(desc_parts).capitalize()
+    return cron_expression
+
+
+class ScheduleCreate(BaseModel):
+    name: str = Field(..., min_length=1, max_length=100)
+    cron_expression: str = Field(..., min_length=9, max_length=100)
+    scenario_tags: list[str] = Field(default=[])
+    scenario_ids: list[UUID] = Field(default=[])
+    environment_id: UUID
+    browsers: list[str] = Field(default=["chromium"])
+    enabled: bool = True
+
+    @field_validator("cron_expression")
+    @classmethod
+    def validate_cron(cls, v: str) -> str:
+        return validate_cron_expression(v)
+
+    @field_validator("browsers")
+    @classmethod
+    def validate_browsers(cls, v: list[str]) -> list[str]:
+        valid_browsers = {"chromium", "firefox", "webkit", "chrome", "edge"}
+        for browser in v:
+            if browser.lower() not in valid_browsers:
+                raise ValueError(f"Invalid browser: {browser}. Must be one of: {', '.join(valid_browsers)}")
+        return [b.lower() for b in v]
+
+
+class ScheduleUpdate(BaseModel):
+    name: Optional[str] = Field(None, min_length=1, max_length=100)
+    cron_expression: Optional[str] = Field(None, min_length=9, max_length=100)
+    scenario_tags: Optional[list[str]] = None
+    scenario_ids: Optional[list[UUID]] = None
+    environment_id: Optional[UUID] = None
+    browsers: Optional[list[str]] = None
+    enabled: Optional[bool] = None
+
+    @field_validator("cron_expression")
+    @classmethod
+    def validate_cron(cls, v: Optional[str]) -> Optional[str]:
+        if v is not None:
+            return validate_cron_expression(v)
+        return v
+
+    @field_validator("browsers")
+    @classmethod
+    def validate_browsers(cls, v: Optional[list[str]]) -> Optional[list[str]]:
+        if v is not None:
+            valid_browsers = {"chromium", "firefox", "webkit", "chrome", "edge"}
+            for browser in v:
+                if browser.lower() not in valid_browsers:
+                    raise ValueError(f"Invalid browser: {browser}. Must be one of: {', '.join(valid_browsers)}")
+            return [b.lower() for b in v]
+        return v
+
+
+class ScheduleResponse(BaseModel):
+    id: UUID
+    name: str
+    cron_expression: str
+    cron_description: str
+    scenario_tags: list[str]
+    scenario_ids: list[UUID]
+    environment_id: UUID
+    environment_name: Optional[str] = None
+    browsers: list[str]
+    enabled: bool
+    created_by: Optional[str]
+    last_run_at: Optional[datetime]
+    next_run_at: Optional[datetime]
+    last_run_id: Optional[UUID]
+    created_at: datetime
+    updated_at: datetime
+
+    class Config:
+        from_attributes = True
+
+
+def schedule_to_response(schedule: Schedule) -> ScheduleResponse:
+    """Convert a Schedule model to a ScheduleResponse."""
+    return ScheduleResponse(
+        id=schedule.id,
+        name=schedule.name,
+        cron_expression=schedule.cron_expression,
+        cron_description=get_cron_description(schedule.cron_expression),
+        scenario_tags=schedule.scenario_tags or [],
+        scenario_ids=schedule.scenario_ids or [],
+        environment_id=schedule.environment_id,
+        environment_name=schedule.environment.name if schedule.environment else None,
+        browsers=schedule.browsers or ["chromium"],
+        enabled=schedule.enabled,
+        created_by=schedule.created_by,
+        last_run_at=schedule.last_run_at,
+        next_run_at=schedule.next_run_at,
+        last_run_id=schedule.last_run_id,
+        created_at=schedule.created_at,
+        updated_at=schedule.updated_at,
+    )
+
+
+@router.get("/schedules", response_model=list[ScheduleResponse])
+async def list_schedules(
+    enabled_only: bool = False,
+    db: Session = Depends(get_db),
+    api_key: str = Depends(get_api_key),
+):
+    """List all schedules."""
+    query = db.query(Schedule)
+    if enabled_only:
+        query = query.filter(Schedule.enabled == True)
+    schedules = query.order_by(Schedule.created_at.desc()).all()
+    return [schedule_to_response(s) for s in schedules]
+
+
+@router.post("/schedules", response_model=ScheduleResponse, status_code=status.HTTP_201_CREATED)
+async def create_schedule(
+    schedule: ScheduleCreate,
+    db: Session = Depends(get_db),
+    api_key: str = Depends(get_api_key),
+):
+    """Create a new schedule."""
+    # Verify environment exists
+    env = db.query(Environment).filter(Environment.id == schedule.environment_id).first()
+    if not env:
+        raise HTTPException(status_code=404, detail="Environment not found")
+
+    # Verify scenario_ids exist if provided
+    if schedule.scenario_ids:
+        existing_ids = {
+            s.id for s in db.query(Scenario.id).filter(Scenario.id.in_(schedule.scenario_ids)).all()
+        }
+        missing = set(schedule.scenario_ids) - existing_ids
+        if missing:
+            raise HTTPException(
+                status_code=400,
+                detail=f"Scenarios not found: {', '.join(str(m) for m in missing)}"
+            )
+
+    # Calculate next run time
+    next_run = calculate_next_run(schedule.cron_expression) if schedule.enabled else None
+
+    db_schedule = Schedule(
+        name=schedule.name,
+        cron_expression=schedule.cron_expression,
+        scenario_tags=schedule.scenario_tags,
+        scenario_ids=schedule.scenario_ids,
+        environment_id=schedule.environment_id,
+        browsers=schedule.browsers,
+        enabled=schedule.enabled,
+        next_run_at=next_run,
+        created_by=api_key,  # Store API key name as creator
+    )
+    db.add(db_schedule)
+    db.commit()
+    db.refresh(db_schedule)
+    return schedule_to_response(db_schedule)
+
+
+@router.get("/schedules/{schedule_id}", response_model=ScheduleResponse)
+async def get_schedule(
+    schedule_id: UUID,
+    db: Session = Depends(get_db),
+    api_key: str = Depends(get_api_key),
+):
+    """Get a schedule by ID."""
+    schedule = db.query(Schedule).filter(Schedule.id == schedule_id).first()
+    if not schedule:
+        raise HTTPException(status_code=404, detail="Schedule not found")
+    return schedule_to_response(schedule)
+
+
+@router.put("/schedules/{schedule_id}", response_model=ScheduleResponse)
+async def update_schedule(
+    schedule_id: UUID,
+    schedule_update: ScheduleUpdate,
+    db: Session = Depends(get_db),
+    api_key: str = Depends(get_api_key),
+):
+    """Update a schedule."""
+    schedule = db.query(Schedule).filter(Schedule.id == schedule_id).first()
+    if not schedule:
+        raise HTTPException(status_code=404, detail="Schedule not found")
+
+    update_data = schedule_update.model_dump(exclude_unset=True)
+
+    # Verify environment if being updated
+    if "environment_id" in update_data:
+        env = db.query(Environment).filter(Environment.id == update_data["environment_id"]).first()
+        if not env:
+            raise HTTPException(status_code=404, detail="Environment not found")
+
+    # Verify scenario_ids if being updated
+    if "scenario_ids" in update_data and update_data["scenario_ids"]:
+        existing_ids = {
+            s.id for s in db.query(Scenario.id).filter(Scenario.id.in_(update_data["scenario_ids"])).all()
+        }
+        missing = set(update_data["scenario_ids"]) - existing_ids
+        if missing:
+            raise HTTPException(
+                status_code=400,
+                detail=f"Scenarios not found: {', '.join(str(m) for m in missing)}"
+            )
+
+    for field, value in update_data.items():
+        setattr(schedule, field, value)
+
+    # Recalculate next run if cron or enabled changed
+    cron_changed = "cron_expression" in update_data
+    enabled_changed = "enabled" in update_data
+
+    if cron_changed or enabled_changed:
+        if schedule.enabled:
+            schedule.next_run_at = calculate_next_run(schedule.cron_expression)
+        else:
+            schedule.next_run_at = None
+
+    schedule.updated_at = datetime.utcnow()
+    db.commit()
+    db.refresh(schedule)
+    return schedule_to_response(schedule)
+
+
+@router.delete("/schedules/{schedule_id}", status_code=status.HTTP_204_NO_CONTENT)
+async def delete_schedule(
+    schedule_id: UUID,
+    db: Session = Depends(get_db),
+    api_key: str = Depends(get_api_key),
+):
+    """Delete a schedule."""
+    schedule = db.query(Schedule).filter(Schedule.id == schedule_id).first()
+    if not schedule:
+        raise HTTPException(status_code=404, detail="Schedule not found")
+
+    db.delete(schedule)
+    db.commit()
+
+
+@router.post("/schedules/{schedule_id}/toggle", response_model=ScheduleResponse)
+async def toggle_schedule(
+    schedule_id: UUID,
+    db: Session = Depends(get_db),
+    api_key: str = Depends(get_api_key),
+):
+    """Toggle a schedule's enabled status."""
+    schedule = db.query(Schedule).filter(Schedule.id == schedule_id).first()
+    if not schedule:
+        raise HTTPException(status_code=404, detail="Schedule not found")
+
+    schedule.enabled = not schedule.enabled
+
+    if schedule.enabled:
+        schedule.next_run_at = calculate_next_run(schedule.cron_expression)
+    else:
+        schedule.next_run_at = None
+
+    schedule.updated_at = datetime.utcnow()
+    db.commit()
+    db.refresh(schedule)
+    return schedule_to_response(schedule)
+
+
+@router.post("/schedules/{schedule_id}/run-now", status_code=status.HTTP_202_ACCEPTED)
+async def run_schedule_now(
+    schedule_id: UUID,
+    db: Session = Depends(get_db),
+    api_key: str = Depends(get_api_key),
+):
+    """Manually trigger a scheduled run immediately."""
+    from app.workers.tasks import execute_scheduled_run
+
+    schedule = db.query(Schedule).filter(Schedule.id == schedule_id).first()
+    if not schedule:
+        raise HTTPException(status_code=404, detail="Schedule not found")
+
+    # Trigger the task
+    task = execute_scheduled_run.delay(str(schedule_id))
+
+    return {
+        "message": "Schedule triggered",
+        "schedule_id": str(schedule_id),
+        "task_id": task.id,
+    }
+
+
+@router.get("/schedules/cron/describe")
+async def describe_cron(
+    expression: str,
+    api_key: str = Depends(get_api_key),
+):
+    """Get a human-readable description and next runs for a cron expression."""
+    try:
+        validate_cron_expression(expression)
+    except ValueError as e:
+        raise HTTPException(status_code=400, detail=str(e))
+
+    # Calculate next 5 run times
+    base_time = datetime.utcnow()
+    next_runs = []
+    for _ in range(5):
+        next_run = calculate_next_run(expression, base_time)
+        next_runs.append(next_run.isoformat())
+        base_time = next_run
+
+    return {
+        "expression": expression,
+        "description": get_cron_description(expression),
+        "next_runs": next_runs,
+    }

@@ -1,17 +1,34 @@
 import { Outlet, NavLink } from 'react-router-dom'
 import UserMenu from './UserMenu'
+import { useAuthStore } from '../store/auth'
 
-const navigation = [
+interface NavItem {
+  name: string
+  path: string
+  adminOnly?: boolean
+}
+
+const navigation: NavItem[] = [
   { name: 'Dashboard', path: '/dashboard' },
   { name: 'Scenarios', path: '/scenarios' },
   { name: 'Custom Steps', path: '/custom-steps' },
   { name: 'Test Runs', path: '/runs' },
+  { name: 'Schedules', path: '/schedules' },
   { name: 'Environments', path: '/environments' },
   { name: 'Repos', path: '/repos' },
   { name: 'Settings', path: '/settings' },
+  { name: 'Users', path: '/users', adminOnly: true },
 ]
 
 export default function Layout() {
+  const { user } = useAuthStore()
+  const isAdmin = user?.role === 'admin'
+
+  // Filter navigation items based on user role
+  const visibleNavigation = navigation.filter(
+    (item) => !item.adminOnly || isAdmin
+  )
+
   return (
     <div className="min-h-screen flex">
       {/* Sidebar */}
@@ -22,7 +39,7 @@ export default function Layout() {
         </div>
 
         <nav className="mt-6">
-          {navigation.map((item) => (
+          {visibleNavigation.map((item) => (
             <NavLink
               key={item.path}
               to={item.path}
@@ -34,7 +51,14 @@ export default function Layout() {
                 }`
               }
             >
-              {item.name}
+              <span className="flex items-center gap-2">
+                {item.name}
+                {item.adminOnly && (
+                  <span className="text-xs bg-purple-500/20 text-purple-400 px-1.5 py-0.5 rounded">
+                    Admin
+                  </span>
+                )}
+              </span>
             </NavLink>
           ))}
         </nav>

@@ -399,3 +399,109 @@ def cleanup_old_data(self):
         return {"success": False, "error": str(e)}
     finally:
         db.close()
+
+
+@celery_app.task(bind=True, max_retries=3)
+def execute_scheduled_run(self, schedule_id: str):
+    """
+    Execute a scheduled test run.
+
+    This task:
+    1. Fetches the schedule configuration
+    2. Creates a new test run
+    3. Queues the test execution
+    4. Updates the schedule with last/next run info
+    """
+    from croniter import croniter
+    from app.models import Schedule, Environment
+
+    db = SessionLocal()
+
+    try:
+        schedule = db.query(Schedule).filter(Schedule.id == UUID(schedule_id)).first()
+        if not schedule:
+            logger.error(f"Schedule {schedule_id} not found")
+            return {"success": False, "error": "Schedule not found"}
+
+        if not schedule.enabled:
+            logger.info(f"Schedule {schedule_id} is disabled, skipping")
+            return {"success": False, "error": "Schedule is disabled"}
+
+        # Get environment
+        environment = db.query(Environment).filter(
+            Environment.id == schedule.environment_id
+        ).first()
+        if not environment:
+            logger.error(f"Environment {schedule.environment_id} not found for schedule {schedule_id}")
+            return {"success": False, "error": "Environment not found"}
+
+        logger.info(f"Executing scheduled run: {schedule.name} (ID: {schedule_id})")
+
+        # Determine scenarios to run
+        scenario_ids = list(schedule.scenario_ids) if schedule.scenario_ids else []
+
+        # If tags are specified, find scenarios with those tags
+        if schedule.scenario_tags:
+            from app.models import Scenario
+            tagged_scenarios = db.query(Scenario).filter(
+                Scenario.tags.overlap(schedule.scenario_tags)
+            ).all()
+            tag_scenario_ids = [s.id for s in tagged_scenarios]
+            # Combine with explicit scenario_ids (union)
+            scenario_ids = list(set(scenario_ids + tag_scenario_ids))
+
+        if not scenario_ids:
+            logger.warning(f"No scenarios to run for schedule {schedule_id}")
+            return {"success": False, "error": "No scenarios to execute"}
+
+        # Create test runs for each browser
+        browsers = schedule.browsers or ["chromium"]
+        run_ids = []
+
+        for browser in browsers:
+            # Create a new test run
+            run = TestRun(
+                scenario_ids=scenario_ids,
+                environment_id=schedule.environment_id,
+                status=RunStatus.QUEUED,
+                browser=browser,
+                triggered_by=f"schedule:{schedule.name}",
+                parallel=True,
+            )
+            db.add(run)
+            db.flush()
+
+            run_ids.append(str(run.id))
+
+            # Queue the test execution
+            execute_test_run.delay(str(run.id))
+
+        # Update schedule tracking
+        now = datetime.utcnow()
+        schedule.last_run_at = now
+        schedule.last_run_id = UUID(run_ids[0]) if run_ids else None
+
+        # Calculate next run time
+        cron = croniter(schedule.cron_expression, now)
+        schedule.next_run_at = cron.get_next(datetime)
+
+        db.commit()
+
+        logger.info(
+            f"Scheduled run {schedule.name} created {len(run_ids)} test run(s): {run_ids}"
+        )
+
+        return {
+            "success": True,
+            "schedule_id": schedule_id,
+            "schedule_name": schedule.name,
+            "run_ids": run_ids,
+            "browsers": browsers,
+            "scenario_count": len(scenario_ids),
+        }
+
+    except Exception as e:
+        logger.error(f"Error executing scheduled run {schedule_id}: {e}")
+        raise self.retry(exc=e, countdown=60)
+    finally:
+        db.close()

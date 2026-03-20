@@ -309,3 +309,121 @@ export async function updateScenarioContent(id: string, content: string): Promis
   const response = await api.put(`/scenarios/${id}/content`, { content })
   return response.data
 }
+
+// User Management
+export interface UserInfo {
+  id: string
+  email: string
+  name: string
+  picture_url: string | null
+  workspace_domain: string
+  role: string
+  is_active: boolean
+  created_at: string
+  last_login: string | null
+}
+
+export async function listUsers(search?: string): Promise<UserInfo[]> {
+  const response = await api.get('/users', { params: search ? { search } : undefined })
+  return response.data
+}
+
+export async function getUser(id: string): Promise<UserInfo> {
+  const response = await api.get(`/users/${id}`)
+  return response.data
+}
+
+export async function updateUserRole(id: string, role: 'admin' | 'user'): Promise<UserInfo> {
+  const response = await api.put(`/users/${id}/role`, { role })
+  return response.data
+}
+
+export async function toggleUserActive(id: string, isActive: boolean): Promise<UserInfo> {
+  const response = await api.put(`/users/${id}/active`, { is_active: isActive })
+  return response.data
+}
+
+// Schedules
+export interface Schedule {
+  id: string
+  name: string
+  cron_expression: string
+  cron_description: string
+  scenario_tags: string[]
+  scenario_ids: string[]
+  environment_id: string
+  environment_name: string | null
+  browsers: string[]
+  enabled: boolean
+  created_by: string | null
+  last_run_at: string | null
+  next_run_at: string | null
+  last_run_id: string | null
+  created_at: string
+  updated_at: string
+}
+
+export interface ScheduleCreate {
+  name: string
+  cron_expression: string
+  scenario_tags?: string[]
+  scenario_ids?: string[]
+  environment_id: string
+  browsers?: string[]
+  enabled?: boolean
+}
+
+export interface ScheduleUpdate {
+  name?: string
+  cron_expression?: string
+  scenario_tags?: string[]
+  scenario_ids?: string[]
+  environment_id?: string
+  browsers?: string[]
+  enabled?: boolean
+}
+
+export interface CronDescription {
+  expression: string
+  description: string
+  next_runs: string[]
+}
+
+export async function listSchedules(enabledOnly?: boolean): Promise<Schedule[]> {
+  const response = await api.get('/schedules', { params: enabledOnly ? { enabled_only: true } : undefined })
+  return response.data
+}
+
+export async function getSchedule(id: string): Promise<Schedule> {
+  const response = await api.get(`/schedules/${id}`)
+  return response.data
+}
+
+export async function createSchedule(data: ScheduleCreate): Promise<Schedule> {
+  const response = await api.post('/schedules', data)
+  return response.data
+}
+
+export async function updateSchedule(id: string, data: ScheduleUpdate): Promise<Schedule> {
+  const response = await api.put(`/schedules/${id}`, data)
+  return response.data
+}
+
+export async function deleteSchedule(id: string): Promise<void> {
+  await api.delete(`/schedules/${id}`)
+}
+
+export async function toggleSchedule(id: string): Promise<Schedule> {
+  const response = await api.post(`/schedules/${id}/toggle`)
+  return response.data
+}
+
+export async function runScheduleNow(id: string): Promise<{ message: string; schedule_id: string; task_id: string }> {
+  const response = await api.post(`/schedules/${id}/run-now`)
+  return response.data
+}
+
+export async function describeCron(expression: string): Promise<CronDescription> {
+  const response = await api.get('/schedules/cron/describe', { params: { expression } })
+  return response.data
+}

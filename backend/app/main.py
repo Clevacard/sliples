@@ -5,7 +5,7 @@ from contextlib import asynccontextmanager
 from fastapi import FastAPI
 from fastapi.middleware.cors import CORSMiddleware
 
-from app.api.routes import health, environments, scenarios, runs, repos, steps, browsers, auth
+from app.api.routes import health, environments, scenarios, runs, repos, steps, browsers, auth, users, schedules
 from app.config import get_settings
 from app.database import engine
 from app.models import Base
@@ -47,6 +47,8 @@ app.include_router(repos.router, prefix="/api/v1", tags=["Repositories"])
 app.include_router(steps.router, prefix="/api/v1", tags=["Custom Steps"])
 app.include_router(browsers.router, prefix="/api/v1", tags=["Browsers"])
 app.include_router(auth.router, prefix="/api/v1", tags=["Authentication"])
+app.include_router(users.router, prefix="/api/v1", tags=["Users"])
+app.include_router(schedules.router, prefix="/api/v1", tags=["Schedules"])
 
 
 @app.get("/")

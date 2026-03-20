@@ -7,6 +7,7 @@ from app.models.test_run import TestRun, TestResult, RunStatus, StepStatus
 from app.models.api_key import ApiKey
 from app.models.custom_step import CustomStep
 from app.models.user import User, UserRole
+from app.models.schedule import Schedule
 
 __all__ = [
     "Base",
@@ -22,4 +23,5 @@ __all__ = [
     "CustomStep",
     "User",
     "UserRole",
+    "Schedule",
 ]

@@ -50,3 +50,48 @@ def cleanup_orphaned_screenshots():
     # 3. Delete S3 objects not in the database
 
     return {"status": "not_implemented"}
+
+
+@celery_app.task
+def check_scheduled_runs():
+    """
+    Check for schedules that are due to run and trigger them.
+
+    Runs every minute (configured in celery_app.py).
+    """
+    from app.models import Schedule
+    from app.workers.tasks import execute_scheduled_run
+    from croniter import croniter
+
+    db = SessionLocal()
+    try:
+        now = datetime.utcnow()
+
+        # Find enabled schedules that are due to run
+        due_schedules = db.query(Schedule).filter(
+            Schedule.enabled == True,
+            Schedule.next_run_at <= now
+        ).all()
+
+        triggered_count = 0
+
+        for schedule in due_schedules:
+            # Trigger the scheduled run
+            execute_scheduled_run.delay(str(schedule.id))
+            triggered_count += 1
+
+            # Update next_run_at to prevent re-triggering
+            # (execute_scheduled_run will update it properly after execution)
+            cron = croniter(schedule.cron_expression, now)
+            schedule.next_run_at = cron.get_next(datetime)
+
+        if triggered_count > 0:
+            db.commit()
+
+        return {
+            "checked_at": now.isoformat(),
+            "triggered_count": triggered_count,
+        }
+
+    finally:
+        db.close()
