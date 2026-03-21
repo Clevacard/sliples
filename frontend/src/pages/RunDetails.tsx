@@ -1,9 +1,12 @@
-import { useEffect, useState, useCallback, useMemo } from 'react'
+import { useEffect, useState, useCallback, useMemo, useRef } from 'react'
 import { useParams, useNavigate } from 'react-router-dom'
 import { useTestRunsStore, TestResult } from '../store/testRuns'
 import Modal from '../components/Modal'
 
 const API_URL = import.meta.env.VITE_API_URL || ''
+
+// Connection mode indicator
+type ConnectionMode = 'websocket' | 'polling' | 'none'
 
 // Helper to construct screenshot URL from S3 path
 const getScreenshotUrl = (path: string) => {
@@ -83,33 +86,89 @@ const AUTO_REFRESH_INTERVAL = 5000 // 5 seconds
 export default function RunDetails() {
   const { id } = useParams<{ id: string }>()
   const navigate = useNavigate()
-  const { currentRun: run, loadingRun: loading, fetchRun, clearCurrentRun, environments, fetchEnvironments } = useTestRunsStore()
+  const {
+    currentRun: run,
+    loadingRun: loading,
+    fetchRun,
+    clearCurrentRun,
+    environments,
+    fetchEnvironments,
+    retryRun,
+    connectWebSocket,
+    disconnectWebSocket,
+    wsConnected,
+    wsError,
+  } = useTestRunsStore()
 
   const [selectedScreenshot, setSelectedScreenshot] = useState<string | null>(null)
   const [expandedSteps, setExpandedSteps] = useState<Set<string>>(new Set())
   const [autoRefresh, setAutoRefresh] = useState(true)
+  const [retrying, setRetrying] = useState(false)
+  const [connectionMode, setConnectionMode] = useState<ConnectionMode>('none')
+
+  // Track if we've attempted WebSocket connection
+  const wsAttempted = useRef(false)
 
   // Fetch run data
   const loadRun = useCallback(() => {
     if (id) fetchRun(id)
   }, [id, fetchRun])
 
+  // Initial load
   useEffect(() => {
     loadRun()
     fetchEnvironments()
-    return () => clearCurrentRun()
-  }, [loadRun, clearCurrentRun, fetchEnvironments])
+    return () => {
+      clearCurrentRun()
+      disconnectWebSocket()
+      wsAttempted.current = false
+    }
+  }, [loadRun, clearCurrentRun, fetchEnvironments, disconnectWebSocket])
 
-  // Auto-refresh while running
+  // Attempt WebSocket connection when viewing a queued/running test
   useEffect(() => {
-    if (!run || run.status !== 'running' || !autoRefresh) return
+    if (!id || !run) return
+
+    const isActive = ['queued', 'running'].includes(run.status)
+
+    if (isActive && !wsAttempted.current) {
+      wsAttempted.current = true
+      console.log('[RunDetails] Attempting WebSocket connection for run:', id)
+      connectWebSocket(id)
+    }
+
+    // If run completed while connected, WebSocket will auto-disconnect
+    if (!isActive) {
+      setConnectionMode('none')
+    }
+  }, [id, run?.status, connectWebSocket])
+
+  // Update connection mode based on WebSocket state
+  useEffect(() => {
+    if (wsConnected) {
+      setConnectionMode('websocket')
+      console.log('[RunDetails] Using WebSocket for real-time updates')
+    } else if (wsError && ['queued', 'running'].includes(run?.status || '')) {
+      setConnectionMode('polling')
+      console.log('[RunDetails] WebSocket failed, falling back to polling')
+    }
+  }, [wsConnected, wsError, run?.status])
+
+  // Fallback to polling if WebSocket is not connected
+  useEffect(() => {
+    if (!run || !['queued', 'running'].includes(run.status) || !autoRefresh) return
+
+    // Only poll if WebSocket is not connected
+    if (connectionMode === 'websocket') {
+      return // WebSocket is handling updates
+    }
 
     const interval = setInterval(() => {
       loadRun()
     }, AUTO_REFRESH_INTERVAL)
 
     return () => clearInterval(interval)
-  }, [run?.status, autoRefresh, loadRun])
+  }, [run?.status, autoRefresh, loadRun, connectionMode])
 
   // Calculate statistics
   const stats = useMemo(() => {
@@ -230,6 +289,40 @@ export default function RunDetails() {
               {autoRefresh ? 'Pause Refresh' : 'Resume Refresh'}
             </button>
           )}
+          {run.status !== 'running' && run.status !== 'queued' && (
+            <button
+              onClick={async () => {
+                setRetrying(true)
+                try {
+                  const newRun = await retryRun(run.id)
+                  navigate(`/runs/${newRun.id}`)
+                } catch (err) {
+                  console.error('Failed to retry run:', err)
+                } finally {
+                  setRetrying(false)
+                }
+              }}
+              disabled={retrying}
+              className="btn btn-primary flex items-center gap-2"
+            >
+              {retrying ? (
+                <>
+                  <svg className="w-4 h-4 animate-spin" fill="none" viewBox="0 0 24 24">
+                    <circle className="opacity-25" cx="12" cy="12" r="10" stroke="currentColor" strokeWidth="4" />
+                    <path className="opacity-75" fill="currentColor" d="M4 12a8 8 0 018-8V0C5.373 0 0 5.373 0 12h4z" />
+                  </svg>
+                  Re-running...
+                </>
+              ) : (
+                <>
+                  <svg className="w-4 h-4" fill="none" stroke="currentColor" viewBox="0 0 24 24">
+                    <path strokeLinecap="round" strokeLinejoin="round" strokeWidth={2} d="M4 4v5h.582m15.356 2A8.001 8.001 0 004.582 9m0 0H9m11 11v-5h-.581m0 0a8.003 8.003 0 01-15.357-2m15.357 2H15" />
+                  </svg>
+                  Re-run
+                </>
+              )}
+            </button>
+          )}
           <a
             href={`/api/v1/runs/${run.id}/report`}
             target="_blank"
@@ -244,9 +337,55 @@ export default function RunDetails() {
         </div>
       </div>
 
+      {/* Progress indicator for queued/starting runs */}
+      {run.status === 'queued' && (
+        <div className="card mb-6">
+          <div className="flex items-center gap-4">
+            <div className="relative">
+              <svg className="w-8 h-8 text-blue-500 animate-spin" fill="none" viewBox="0 0 24 24">
+                <circle className="opacity-25" cx="12" cy="12" r="10" stroke="currentColor" strokeWidth="4" />
+                <path className="opacity-75" fill="currentColor" d="M4 12a8 8 0 018-8V0C5.373 0 0 5.373 0 12h4z" />
+              </svg>
+            </div>
+            <div>
+              <p className="text-gray-200 font-medium">Starting test run...</p>
+              <p className="text-sm text-gray-400 mt-1">
+                {run.progress_message || 'Waiting for worker to pick up the job...'}
+              </p>
+            </div>
+          </div>
+          {autoRefresh && (
+            <p className="text-xs text-gray-500 mt-3 flex items-center gap-2">
+              {connectionMode === 'websocket' ? (
+                <>
+                  <span className="w-2 h-2 bg-green-500 rounded-full animate-pulse"></span>
+                  Real-time updates via WebSocket
+                </>
+              ) : connectionMode === 'polling' ? (
+                <>
+                  <span className="w-2 h-2 bg-yellow-500 rounded-full"></span>
+                  Polling every 5s (WebSocket unavailable)
+                </>
+              ) : (
+                'Auto-refreshing every 5s'
+              )}
+            </p>
+          )}
+        </div>
+      )}
+
       {/* Progress Bar (for running tests) */}
       {run.status === 'running' && (
         <div className="card mb-6">
+          {run.progress_message && (
+            <p className="text-sm text-blue-400 mb-3 flex items-center gap-2">
+              <svg className="w-4 h-4 animate-spin" fill="none" viewBox="0 0 24 24">
+                <circle className="opacity-25" cx="12" cy="12" r="10" stroke="currentColor" strokeWidth="4" />
+                <path className="opacity-75" fill="currentColor" d="M4 12a8 8 0 018-8V0C5.373 0 0 5.373 0 12h4z" />
+              </svg>
+              {run.progress_message}
+            </p>
+          )}
           <div className="flex justify-between items-center mb-2">
             <span className="text-sm text-gray-400">Progress</span>
             <span className="text-sm text-gray-300">{Math.round(stats.progress)}%</span>
@@ -257,9 +396,26 @@ export default function RunDetails() {
               style={{ width: `${stats.progress}%` }}
             />
           </div>
-          <p className="text-xs text-gray-500 mt-2">
+          <p className="text-xs text-gray-500 mt-2 flex items-center gap-2">
             {stats.passed + stats.failed + stats.skipped} of {stats.total} steps completed
-            {autoRefresh && ' - Auto-refreshing every 5s'}
+            {autoRefresh && (
+              <>
+                {' - '}
+                {connectionMode === 'websocket' ? (
+                  <>
+                    <span className="w-2 h-2 bg-green-500 rounded-full animate-pulse"></span>
+                    Real-time updates
+                  </>
+                ) : connectionMode === 'polling' ? (
+                  <>
+                    <span className="w-2 h-2 bg-yellow-500 rounded-full"></span>
+                    Polling every 5s
+                  </>
+                ) : (
+                  'Auto-refreshing every 5s'
+                )}
+              </>
+            )}
           </p>
         </div>
       )}

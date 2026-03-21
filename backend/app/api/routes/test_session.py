@@ -9,7 +9,7 @@ from sqlalchemy.orm import Session
 from pydantic import BaseModel
 
 from app.database import get_db
-from app.models import Environment, Scenario, TestSession, User
+from app.models import Environment, Scenario, TestSession, User, CustomStep
 from app.api.deps import get_api_key_or_user
 from app.services.interactive_executor import InteractiveExecutor, StepExecutionResult
 
@@ -245,8 +245,15 @@ async def execute_step(
     if not interactive_session:
         raise HTTPException(status_code=404, detail="Session not found or not active")
 
+    # Load custom steps from database
+    custom_step_records = db.query(CustomStep).all()
+    custom_steps = {step.pattern: step.code for step in custom_step_records}
+
     # Execute step
-    result = await interactive_session.execute_step(step_index=request.step_index)
+    result = await interactive_session.execute_step(
+        step_index=request.step_index,
+        custom_steps=custom_steps if custom_steps else None,
+    )
 
     # Update database
     db_session = db.query(TestSession).filter(TestSession.id == session_id).first()

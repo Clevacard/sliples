@@ -1,0 +1,73 @@
+apiVersion: kustomize.config.k8s.io/v1beta1
+kind: Kustomization
+
+namespace: sliples
+
+# Common labels applied to all resources
+commonLabels:
+  app.kubernetes.io/part-of: sliples
+  app.kubernetes.io/managed-by: kustomize
+
+resources:
+  # Namespace
+  - namespace.yaml
+
+  # Secrets (template - update with real values before deployment)
+  - secrets/secrets-template.yaml
+
+  # ConfigMaps
+  - configmaps/backend-config.yaml
+  - configmaps/worker-config.yaml
+
+  # PostgreSQL
+  - postgres/pvc.yaml
+  - postgres/deployment.yaml
+  - postgres/service.yaml
+
+  # Redis
+  - redis/deployment.yaml
+  - redis/service.yaml
+
+  # MinIO
+  - minio/pvc.yaml
+  - minio/deployment.yaml
+  - minio/service.yaml
+
+  # Browser containers
+  - browsers/chrome-deployment.yaml
+  - browsers/chrome-service.yaml
+  - browsers/firefox-deployment.yaml
+  - browsers/firefox-service.yaml
+
+  # Backend
+  - backend/deployment.yaml
+  - backend/service.yaml
+  - backend/route.yaml
+
+  # Frontend
+  - frontend/configmap-nginx.yaml
+  - frontend/deployment.yaml
+  - frontend/service.yaml
+  - frontend/route.yaml
+
+  # Worker
+  - worker/deployment.yaml
+  - worker/hpa.yaml
+
+  # Network Policies (optional - uncomment for production)
+  # - network-policy.yaml
+
+# Images - override these for different environments
+images:
+  - name: sliples-backend
+    newName: your-registry.example.com/sliples/backend
+    newTag: latest
+  - name: sliples-frontend
+    newName: your-registry.example.com/sliples/frontend
+    newTag: latest
+
+# Patches for environment-specific configurations
+# Uncomment and customize for production
+# patchesStrategicMerge:
+#   - patches/production-replicas.yaml
+#   - patches/production-resources.yaml

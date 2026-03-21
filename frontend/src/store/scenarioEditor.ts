@@ -184,7 +184,7 @@ export const useScenarioEditorStore = create<ScenarioEditorState>((set, get) => 
         originalContent: data.content || '',
         content: data.content || '',
         isDirty: false,
-        isEditMode: false,
+        isEditMode: true,  // Start in edit mode by default
       })
 
       // Auto-expand nodes to show the file

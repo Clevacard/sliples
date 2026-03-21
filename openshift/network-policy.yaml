@@ -1,0 +1,197 @@
+---
+# Default deny all ingress traffic
+apiVersion: networking.k8s.io/v1
+kind: NetworkPolicy
+metadata:
+  name: default-deny-ingress
+  namespace: sliples
+  labels:
+    app.kubernetes.io/name: sliples
+spec:
+  podSelector: {}
+  policyTypes:
+    - Ingress
+---
+# Allow traffic from OpenShift router to frontend
+apiVersion: networking.k8s.io/v1
+kind: NetworkPolicy
+metadata:
+  name: allow-router-to-frontend
+  namespace: sliples
+  labels:
+    app.kubernetes.io/name: sliples
+spec:
+  podSelector:
+    matchLabels:
+      app.kubernetes.io/component: frontend
+  policyTypes:
+    - Ingress
+  ingress:
+    - from:
+        - namespaceSelector:
+            matchLabels:
+              network.openshift.io/policy-group: ingress
+      ports:
+        - protocol: TCP
+          port: 8080
+---
+# Allow traffic from OpenShift router to backend
+apiVersion: networking.k8s.io/v1
+kind: NetworkPolicy
+metadata:
+  name: allow-router-to-backend
+  namespace: sliples
+  labels:
+    app.kubernetes.io/name: sliples
+spec:
+  podSelector:
+    matchLabels:
+      app.kubernetes.io/component: backend
+  policyTypes:
+    - Ingress
+  ingress:
+    - from:
+        - namespaceSelector:
+            matchLabels:
+              network.openshift.io/policy-group: ingress
+      ports:
+        - protocol: TCP
+          port: 8000
+---
+# Allow frontend to access backend
+apiVersion: networking.k8s.io/v1
+kind: NetworkPolicy
+metadata:
+  name: allow-frontend-to-backend
+  namespace: sliples
+  labels:
+    app.kubernetes.io/name: sliples
+spec:
+  podSelector:
+    matchLabels:
+      app.kubernetes.io/component: backend
+  policyTypes:
+    - Ingress
+  ingress:
+    - from:
+        - podSelector:
+            matchLabels:
+              app.kubernetes.io/component: frontend
+      ports:
+        - protocol: TCP
+          port: 8000
+---
+# Allow backend and worker to access PostgreSQL
+apiVersion: networking.k8s.io/v1
+kind: NetworkPolicy
+metadata:
+  name: allow-app-to-postgres
+  namespace: sliples
+  labels:
+    app.kubernetes.io/name: sliples
+spec:
+  podSelector:
+    matchLabels:
+      app.kubernetes.io/component: postgres
+  policyTypes:
+    - Ingress
+  ingress:
+    - from:
+        - podSelector:
+            matchLabels:
+              app.kubernetes.io/component: backend
+        - podSelector:
+            matchLabels:
+              app.kubernetes.io/component: worker
+        - podSelector:
+            matchLabels:
+              app.kubernetes.io/component: beat
+      ports:
+        - protocol: TCP
+          port: 5432
+---
+# Allow backend and worker to access Redis
+apiVersion: networking.k8s.io/v1
+kind: NetworkPolicy
+metadata:
+  name: allow-app-to-redis
+  namespace: sliples
+  labels:
+    app.kubernetes.io/name: sliples
+spec:
+  podSelector:
+    matchLabels:
+      app.kubernetes.io/component: redis
+  policyTypes:
+    - Ingress
+  ingress:
+    - from:
+        - podSelector:
+            matchLabels:
+              app.kubernetes.io/component: backend
+        - podSelector:
+            matchLabels:
+              app.kubernetes.io/component: worker
+        - podSelector:
+            matchLabels:
+              app.kubernetes.io/component: beat
+      ports:
+        - protocol: TCP
+          port: 6379
+---
+# Allow backend and worker to access MinIO
+apiVersion: networking.k8s.io/v1
+kind: NetworkPolicy
+metadata:
+  name: allow-app-to-minio
+  namespace: sliples
+  labels:
+    app.kubernetes.io/name: sliples
+spec:
+  podSelector:
+    matchLabels:
+      app.kubernetes.io/component: minio
+  policyTypes:
+    - Ingress
+  ingress:
+    - from:
+        - podSelector:
+            matchLabels:
+              app.kubernetes.io/component: backend
+        - podSelector:
+            matchLabels:
+              app.kubernetes.io/component: worker
+      ports:
+        - protocol: TCP
+          port: 9000
+        - protocol: TCP
+          port: 9001
+---
+# Allow workers to access browser containers
+apiVersion: networking.k8s.io/v1
+kind: NetworkPolicy
+metadata:
+  name: allow-worker-to-browsers
+  namespace: sliples
+  labels:
+    app.kubernetes.io/name: sliples
+spec:
+  podSelector:
+    matchLabels:
+      app.kubernetes.io/name: sliples
+    matchExpressions:
+      - key: app.kubernetes.io/component
+        operator: In
+        values:
+          - browser-chrome
+          - browser-firefox
+  policyTypes:
+    - Ingress
+  ingress:
+    - from:
+        - podSelector:
+            matchLabels:
+              app.kubernetes.io/component: worker
+      ports:
+        - protocol: TCP
+          port: 3000

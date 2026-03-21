@@ -1,9 +1,9 @@
-import { useState } from 'react'
+import { useState, useEffect } from 'react'
 import { useAuthStore } from '../store/auth'
 import { useSettingsStore } from '../store/settings'
 import ApiKeyManager from '../components/ApiKeyManager'
 
-type TabId = 'profile' | 'apikeys' | 'preferences'
+type TabId = 'profile' | 'apikeys' | 'system' | 'preferences'
 
 interface Tab {
   id: TabId
@@ -27,6 +27,15 @@ const tabs: Tab[] = [
     icon: (
       <svg className="w-5 h-5" fill="none" stroke="currentColor" viewBox="0 0 24 24">
         <path strokeLinecap="round" strokeLinejoin="round" strokeWidth={2} d="M15 7a2 2 0 012 2m4 0a6 6 0 01-7.743 5.743L11 17H9v2H7v2H4a1 1 0 01-1-1v-2.586a1 1 0 01.293-.707l5.964-5.964A6 6 0 1121 9z" />
+      </svg>
+    ),
+  },
+  {
+    id: 'system',
+    name: 'System',
+    icon: (
+      <svg className="w-5 h-5" fill="none" stroke="currentColor" viewBox="0 0 24 24">
+        <path strokeLinecap="round" strokeLinejoin="round" strokeWidth={2} d="M5 12h14M5 12a2 2 0 01-2-2V6a2 2 0 012-2h14a2 2 0 012 2v4a2 2 0 01-2 2M5 12a2 2 0 00-2 2v4a2 2 0 002 2h14a2 2 0 002-2v-4a2 2 0 00-2-2m-2-4h.01M17 16h.01" />
       </svg>
     ),
   },
@@ -139,6 +148,255 @@ function ProfileTab() {
             </svg>
             Health Check Endpoint
           </a>
+        </div>
+      </div>
+    </div>
+  )
+}
+
+function SystemTab() {
+  const {
+    systemConfig,
+    isLoadingConfig,
+    configError,
+    fetchSystemConfig,
+  } = useSettingsStore()
+
+  useEffect(() => {
+    fetchSystemConfig()
+  }, [fetchSystemConfig])
+
+  if (isLoadingConfig) {
+    return (
+      <div className="animate-pulse space-y-6">
+        <div className="card">
+          <div className="h-6 bg-gray-700 rounded w-40 mb-4" />
+          <div className="space-y-3">
+            <div className="h-4 bg-gray-700 rounded w-full" />
+            <div className="h-4 bg-gray-700 rounded w-3/4" />
+            <div className="h-4 bg-gray-700 rounded w-1/2" />
+          </div>
+        </div>
+        <div className="card">
+          <div className="h-6 bg-gray-700 rounded w-48 mb-4" />
+          <div className="space-y-3">
+            <div className="h-4 bg-gray-700 rounded w-full" />
+            <div className="h-4 bg-gray-700 rounded w-2/3" />
+          </div>
+        </div>
+      </div>
+    )
+  }
+
+  if (configError) {
+    return (
+      <div className="card border-red-500/30 bg-red-500/10">
+        <div className="flex items-center gap-3">
+          <svg className="w-6 h-6 text-red-400" fill="none" stroke="currentColor" viewBox="0 0 24 24">
+            <path strokeLinecap="round" strokeLinejoin="round" strokeWidth={2} d="M12 8v4m0 4h.01M21 12a9 9 0 11-18 0 9 9 0 0118 0z" />
+          </svg>
+          <div>
+            <p className="text-red-400 font-medium">Failed to load system configuration</p>
+            <p className="text-red-400/70 text-sm mt-1">{configError}</p>
+          </div>
+        </div>
+        <button
+          onClick={() => fetchSystemConfig()}
+          className="mt-4 btn btn-secondary text-sm"
+        >
+          Retry
+        </button>
+      </div>
+    )
+  }
+
+  const maskValue = (value: string | undefined, showChars: number = 4): string => {
+    if (!value) return 'Not configured'
+    if (value.length <= showChars * 2) return '*'.repeat(value.length)
+    return value.substring(0, showChars) + '*'.repeat(8) + value.substring(value.length - showChars)
+  }
+
+  return (
+    <div className="space-y-6">
+      {/* Email Configuration */}
+      <div className="card">
+        <div className="flex items-center gap-3 mb-6">
+          <div className="p-2 bg-blue-500/20 rounded-lg">
+            <svg className="w-5 h-5 text-blue-400" fill="none" stroke="currentColor" viewBox="0 0 24 24">
+              <path strokeLinecap="round" strokeLinejoin="round" strokeWidth={2} d="M3 8l7.89 5.26a2 2 0 002.22 0L21 8M5 19h14a2 2 0 002-2V7a2 2 0 00-2-2H5a2 2 0 00-2 2v10a2 2 0 002 2z" />
+            </svg>
+          </div>
+          <div>
+            <h3 className="text-lg font-medium text-gray-100">Email Configuration</h3>
+            <p className="text-sm text-gray-400">SMTP settings for email notifications</p>
+          </div>
+          <span className={`ml-auto px-2.5 py-0.5 rounded-full text-xs font-medium ${
+            systemConfig?.email?.configured
+              ? 'bg-green-500/20 text-green-400'
+              : 'bg-yellow-500/20 text-yellow-400'
+          }`}>
+            {systemConfig?.email?.configured ? 'Configured' : 'Not Configured'}
+          </span>
+        </div>
+
+        <div className="grid grid-cols-2 gap-4">
+          <div>
+            <label className="block text-sm font-medium text-gray-400 mb-1">SMTP Host</label>
+            <div className="bg-gray-700/50 rounded-lg px-3 py-2 text-gray-300 font-mono text-sm">
+              {systemConfig?.email?.host || 'Not configured'}
+            </div>
+          </div>
+          <div>
+            <label className="block text-sm font-medium text-gray-400 mb-1">SMTP Port</label>
+            <div className="bg-gray-700/50 rounded-lg px-3 py-2 text-gray-300 font-mono text-sm">
+              {systemConfig?.email?.port || 'Not configured'}
+            </div>
+          </div>
+          <div>
+            <label className="block text-sm font-medium text-gray-400 mb-1">From Address</label>
+            <div className="bg-gray-700/50 rounded-lg px-3 py-2 text-gray-300 font-mono text-sm">
+              {systemConfig?.email?.from_address || 'Not configured'}
+            </div>
+          </div>
+          <div>
+            <label className="block text-sm font-medium text-gray-400 mb-1">TLS Enabled</label>
+            <div className="bg-gray-700/50 rounded-lg px-3 py-2 text-gray-300 font-mono text-sm">
+              {systemConfig?.email?.tls_enabled !== undefined
+                ? (systemConfig.email.tls_enabled ? 'Yes' : 'No')
+                : 'Not configured'}
+            </div>
+          </div>
+        </div>
+
+        <div className="mt-4 pt-4 border-t border-gray-700">
+          <p className="text-xs text-gray-500">
+            Email settings are configured via environment variables. Contact your administrator to modify these settings.
+          </p>
+        </div>
+      </div>
+
+      {/* Storage Configuration */}
+      <div className="card">
+        <div className="flex items-center gap-3 mb-6">
+          <div className="p-2 bg-purple-500/20 rounded-lg">
+            <svg className="w-5 h-5 text-purple-400" fill="none" stroke="currentColor" viewBox="0 0 24 24">
+              <path strokeLinecap="round" strokeLinejoin="round" strokeWidth={2} d="M4 7v10c0 2.21 3.582 4 8 4s8-1.79 8-4V7M4 7c0 2.21 3.582 4 8 4s8-1.79 8-4M4 7c0-2.21 3.582-4 8-4s8 1.79 8 4m0 5c0 2.21-3.582 4-8 4s-8-1.79-8-4" />
+            </svg>
+          </div>
+          <div>
+            <h3 className="text-lg font-medium text-gray-100">Storage Configuration</h3>
+            <p className="text-sm text-gray-400">S3/MinIO settings for screenshots and artifacts</p>
+          </div>
+          <span className={`ml-auto px-2.5 py-0.5 rounded-full text-xs font-medium ${
+            systemConfig?.storage?.configured
+              ? 'bg-green-500/20 text-green-400'
+              : 'bg-yellow-500/20 text-yellow-400'
+          }`}>
+            {systemConfig?.storage?.configured ? 'Configured' : 'Not Configured'}
+          </span>
+        </div>
+
+        <div className="grid grid-cols-2 gap-4">
+          <div>
+            <label className="block text-sm font-medium text-gray-400 mb-1">Endpoint</label>
+            <div className="bg-gray-700/50 rounded-lg px-3 py-2 text-gray-300 font-mono text-sm truncate">
+              {systemConfig?.storage?.endpoint || 'Not configured'}
+            </div>
+          </div>
+          <div>
+            <label className="block text-sm font-medium text-gray-400 mb-1">Bucket</label>
+            <div className="bg-gray-700/50 rounded-lg px-3 py-2 text-gray-300 font-mono text-sm">
+              {systemConfig?.storage?.bucket || 'Not configured'}
+            </div>
+          </div>
+          <div>
+            <label className="block text-sm font-medium text-gray-400 mb-1">Access Key</label>
+            <div className="bg-gray-700/50 rounded-lg px-3 py-2 text-gray-300 font-mono text-sm">
+              {maskValue(systemConfig?.storage?.access_key)}
+            </div>
+          </div>
+          <div>
+            <label className="block text-sm font-medium text-gray-400 mb-1">Region</label>
+            <div className="bg-gray-700/50 rounded-lg px-3 py-2 text-gray-300 font-mono text-sm">
+              {systemConfig?.storage?.region || 'Not configured'}
+            </div>
+          </div>
+        </div>
+
+        <div className="mt-4 pt-4 border-t border-gray-700">
+          <p className="text-xs text-gray-500">
+            Storage settings are configured via environment variables. Contact your administrator to modify these settings.
+          </p>
+        </div>
+      </div>
+
+      {/* Data Retention */}
+      <div className="card">
+        <div className="flex items-center gap-3 mb-6">
+          <div className="p-2 bg-orange-500/20 rounded-lg">
+            <svg className="w-5 h-5 text-orange-400" fill="none" stroke="currentColor" viewBox="0 0 24 24">
+              <path strokeLinecap="round" strokeLinejoin="round" strokeWidth={2} d="M12 8v4l3 3m6-3a9 9 0 11-18 0 9 9 0 0118 0z" />
+            </svg>
+          </div>
+          <div>
+            <h3 className="text-lg font-medium text-gray-100">Data Retention</h3>
+            <p className="text-sm text-gray-400">Automatic cleanup policy for test data</p>
+          </div>
+        </div>
+
+        <div className="grid grid-cols-2 gap-4">
+          <div>
+            <label className="block text-sm font-medium text-gray-400 mb-1">Default Retention Period</label>
+            <div className="bg-gray-700/50 rounded-lg px-3 py-2 text-gray-300 font-mono text-sm">
+              {systemConfig?.retention?.default_days
+                ? `${systemConfig.retention.default_days} days`
+                : '365 days (default)'}
+            </div>
+          </div>
+          <div>
+            <label className="block text-sm font-medium text-gray-400 mb-1">Cleanup Schedule</label>
+            <div className="bg-gray-700/50 rounded-lg px-3 py-2 text-gray-300 font-mono text-sm">
+              {systemConfig?.retention?.cleanup_schedule || 'Daily at midnight'}
+            </div>
+          </div>
+          <div className="col-span-2">
+            <label className="block text-sm font-medium text-gray-400 mb-1">Last Cleanup Run</label>
+            <div className="bg-gray-700/50 rounded-lg px-3 py-2 text-gray-300 font-mono text-sm">
+              {systemConfig?.retention?.last_cleanup
+                ? new Date(systemConfig.retention.last_cleanup).toLocaleString()
+                : 'Never'}
+            </div>
+          </div>
+        </div>
+
+        <div className="mt-4 p-4 bg-gray-700/30 rounded-lg">
+          <h4 className="text-sm font-medium text-gray-300 mb-2">What gets deleted?</h4>
+          <ul className="text-sm text-gray-400 space-y-1">
+            <li className="flex items-center gap-2">
+              <svg className="w-4 h-4 text-gray-500" fill="none" stroke="currentColor" viewBox="0 0 24 24">
+                <path strokeLinecap="round" strokeLinejoin="round" strokeWidth={2} d="M5 13l4 4L19 7" />
+              </svg>
+              Test run results older than retention period
+            </li>
+            <li className="flex items-center gap-2">
+              <svg className="w-4 h-4 text-gray-500" fill="none" stroke="currentColor" viewBox="0 0 24 24">
+                <path strokeLinecap="round" strokeLinejoin="round" strokeWidth={2} d="M5 13l4 4L19 7" />
+              </svg>
+              Screenshots and artifacts from deleted runs
+            </li>
+            <li className="flex items-center gap-2">
+              <svg className="w-4 h-4 text-gray-500" fill="none" stroke="currentColor" viewBox="0 0 24 24">
+                <path strokeLinecap="round" strokeLinejoin="round" strokeWidth={2} d="M5 13l4 4L19 7" />
+              </svg>
+              Log files older than retention period
+            </li>
+          </ul>
+        </div>
+
+        <div className="mt-4 pt-4 border-t border-gray-700">
+          <p className="text-xs text-gray-500">
+            Per-environment retention can be configured in the Environments settings. The system default is 12 months (365 days).
+          </p>
         </div>
       </div>
     </div>
@@ -318,6 +576,7 @@ export default function Settings() {
       <div>
         {activeTab === 'profile' && <ProfileTab />}
         {activeTab === 'apikeys' && <ApiKeyManager />}
+        {activeTab === 'system' && <SystemTab />}
         {activeTab === 'preferences' && <PreferencesTab />}
       </div>
     </div>

@@ -18,13 +18,25 @@ class StepCreate(BaseModel):
     repo_id: Optional[UUID] = None
     name: str
     pattern: str
-    code: str
+    code: Optional[str] = None
+    implementation: Optional[str] = None  # Alias for code (frontend compatibility)
+    description: Optional[str] = None
+
+    def get_code(self) -> str:
+        """Get code from either field."""
+        return self.code or self.implementation or ""
 
 
 class StepUpdate(BaseModel):
     name: Optional[str] = None
     pattern: Optional[str] = None
     code: Optional[str] = None
+    implementation: Optional[str] = None  # Alias for code (frontend compatibility)
+    description: Optional[str] = None
+
+    def get_code(self) -> Optional[str]:
+        """Get code from either field."""
+        return self.code or self.implementation
 
 
 class StepResponse(BaseModel):
@@ -53,6 +65,7 @@ async def list_custom_steps(
     return query.all()
 
 
+@router.post("/steps", response_model=StepResponse, status_code=status.HTTP_201_CREATED)
 @router.post("/steps/custom", response_model=StepResponse, status_code=status.HTTP_201_CREATED)
 async def create_custom_step(
     step: StepCreate,
@@ -75,7 +88,7 @@ async def create_custom_step(
         repo_id=step.repo_id,
         name=step.name,
         pattern=step.pattern,
-        code=step.code,
+        code=step.get_code(),
     )
     db.add(db_step)
     db.commit()
@@ -83,6 +96,7 @@ async def create_custom_step(
     return db_step
 
 
+@router.put("/steps/{step_id}", response_model=StepResponse)
 @router.put("/steps/custom/{step_id}", response_model=StepResponse)
 async def update_custom_step(
     step_id: UUID,
@@ -95,12 +109,19 @@ async def update_custom_step(
     if not step:
         raise HTTPException(status_code=404, detail="Step not found")
 
-    update_data = step_update.model_dump(exclude_unset=True)
-    for field, value in update_data.items():
-        setattr(step, field, value)
+    # Handle field updates
+    if step_update.name is not None:
+        step.name = step_update.name
+    if step_update.pattern is not None:
+        step.pattern = step_update.pattern
 
-    # Mark as uncommitted if code changed
-    if "code" in update_data or "pattern" in update_data:
+    # Handle code/implementation (frontend sends 'implementation')
+    new_code = step_update.get_code()
+    if new_code is not None:
+        step.code = new_code
+
+    # Mark as uncommitted if code or pattern changed
+    if step_update.pattern is not None or new_code is not None:
         step.committed = False
 
     db.commit()
@@ -129,6 +150,7 @@ async def save_step_to_repo(
     return {"status": "committed", "step_id": str(step_id)}
 
 
+@router.delete("/steps/{step_id}", status_code=status.HTTP_204_NO_CONTENT)
 @router.delete("/steps/custom/{step_id}", status_code=status.HTTP_204_NO_CONTENT)
 async def delete_custom_step(
     step_id: UUID,

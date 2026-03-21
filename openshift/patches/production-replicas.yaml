@@ -1,0 +1,42 @@
+# Production replica counts
+# Apply with: kustomize build --load-restrictor LoadRestrictionsNone overlays/production
+---
+apiVersion: apps/v1
+kind: Deployment
+metadata:
+  name: sliples-backend
+  namespace: sliples
+spec:
+  replicas: 3
+---
+apiVersion: apps/v1
+kind: Deployment
+metadata:
+  name: sliples-frontend
+  namespace: sliples
+spec:
+  replicas: 3
+---
+apiVersion: apps/v1
+kind: Deployment
+metadata:
+  name: sliples-worker
+  namespace: sliples
+spec:
+  replicas: 5
+---
+apiVersion: apps/v1
+kind: Deployment
+metadata:
+  name: sliples-browser-chrome
+  namespace: sliples
+spec:
+  replicas: 3
+---
+apiVersion: apps/v1
+kind: Deployment
+metadata:
+  name: sliples-browser-firefox
+  namespace: sliples
+spec:
+  replicas: 3

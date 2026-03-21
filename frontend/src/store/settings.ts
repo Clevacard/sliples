@@ -19,6 +19,28 @@ export interface Preferences {
   }
 }
 
+export interface SystemConfig {
+  email?: {
+    configured: boolean
+    host?: string
+    port?: number
+    from_address?: string
+    tls_enabled?: boolean
+  }
+  storage?: {
+    configured: boolean
+    endpoint?: string
+    bucket?: string
+    access_key?: string
+    region?: string
+  }
+  retention?: {
+    default_days: number
+    cleanup_schedule?: string
+    last_cleanup?: string
+  }
+}
+
 interface SettingsState {
   // API Keys
   apiKeys: ApiKey[]
@@ -27,6 +49,11 @@ interface SettingsState {
   isRevokingKey: string | null  // ID of key being revoked
   keysError: string | null
 
+  // System Configuration
+  systemConfig: SystemConfig | null
+  isLoadingConfig: boolean
+  configError: string | null
+
   // Preferences
   preferences: Preferences
 
@@ -34,6 +61,7 @@ interface SettingsState {
   fetchApiKeys: () => Promise<void>
   createApiKey: (name: string) => Promise<api.CreateApiKeyResponse>
   revokeApiKey: (id: string) => Promise<void>
+  fetchSystemConfig: () => Promise<void>
   updatePreferences: (updates: Partial<Preferences>) => void
   clearKeysError: () => void
 }
@@ -56,6 +84,9 @@ export const useSettingsStore = create<SettingsState>()(
       isCreatingKey: false,
       isRevokingKey: null,
       keysError: null,
+      systemConfig: null,
+      isLoadingConfig: false,
+      configError: null,
       preferences: defaultPreferences,
 
       // Fetch API keys
@@ -109,6 +140,21 @@ export const useSettingsStore = create<SettingsState>()(
             isRevokingKey: null,
           })
           throw error
+        }
+      },
+
+      // Fetch system configuration
+      fetchSystemConfig: async () => {
+        set({ isLoadingConfig: true, configError: null })
+        try {
+          const config = await api.getSystemConfig()
+          set({ systemConfig: config, isLoadingConfig: false })
+        } catch (error) {
+          console.error('Failed to fetch system config:', error)
+          set({
+            configError: error instanceof Error ? error.message : 'Failed to load system configuration',
+            isLoadingConfig: false,
+          })
         }
       },
 

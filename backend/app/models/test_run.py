@@ -50,6 +50,7 @@ class TestRun(Base):
     report_html = Column(Text, nullable=True)
     email_sent = Column(Boolean, default=False)
     expires_at = Column(DateTime, nullable=True)
+    progress_message = Column(String(500), nullable=True)  # Progress status during execution
     created_at = Column(DateTime, default=datetime.utcnow)
 
     environment = relationship("Environment", back_populates="test_runs")

@@ -1,0 +1,7 @@
+apiVersion: v1
+kind: Namespace
+metadata:
+  name: sliples
+  labels:
+    app.kubernetes.io/name: sliples
+    app.kubernetes.io/part-of: sliples

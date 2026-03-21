@@ -10,6 +10,7 @@ from app.database import SessionLocal
 from app.models import ScenarioRepo, TestRun, TestResult, RunStatus, StepStatus, Scenario, CustomStep
 from app.services.s3_service import S3Service
 from app.services.test_executor import run_test_execution
+from app.services.websocket_pubsub import run_update_publisher
 
 logger = logging.getLogger(__name__)
 
@@ -29,6 +30,33 @@ def execute_test_run(self, run_id: str):
     """
     db = SessionLocal()
     s3_service = None
+    passed_count = 0
+    failed_count = 0
+    completed_steps = 0
+
+    def update_progress(message: str):
+        """Update progress message in database and publish to WebSocket."""
+        nonlocal passed_count, failed_count, completed_steps
+        try:
+            run = db.query(TestRun).filter(TestRun.id == UUID(run_id)).first()
+            if run:
+                run.progress_message = message
+                db.commit()
+
+                # Publish progress update via Redis pub/sub
+                run_update_publisher.publish_progress(
+                    run_id=run_id,
+                    status=run.status.value,
+                    progress_message=message,
+                    total_scenarios=len(run.scenario_ids) if run.scenario_ids else 0,
+                    completed_steps=completed_steps,
+                    passed=passed_count,
+                    failed=failed_count,
+                )
+
+            logger.info(f"[{run_id}] {message}")
+        except Exception as e:
+            logger.warning(f"Failed to update progress: {e}")
 
     try:
         # Fetch the test run
@@ -37,14 +65,26 @@ def execute_test_run(self, run_id: str):
             logger.error(f"Test run {run_id} not found")
             return {"success": False, "error": "Test run not found"}
 
+        update_progress("Initializing test run...")
+
         # Update status to running
+        old_status = run.status.value
         run.status = RunStatus.RUNNING
         run.started_at = datetime.utcnow()
         db.commit()
 
+        # Publish status update via Redis pub/sub
+        run_update_publisher.publish_status_update(
+            run_id=run_id,
+            old_status=old_status,
+            new_status=run.status.value,
+            started_at=run.started_at.isoformat() if run.started_at else None,
+        )
+
         logger.info(f"Executing test run {run_id} with browser {run.browser}")
 
         # Initialize S3 service for screenshot uploads
+        update_progress("Initializing screenshot storage...")
         try:
             s3_service = S3Service()
         except Exception as e:
@@ -55,6 +95,7 @@ def execute_test_run(self, run_id: str):
         base_url = environment.base_url
 
         # Fetch scenarios to execute
+        update_progress("Loading scenarios...")
         scenario_ids = run.scenario_ids or []
         if scenario_ids:
             scenarios = db.query(Scenario).filter(Scenario.id.in_(scenario_ids)).all()
@@ -65,9 +106,12 @@ def execute_test_run(self, run_id: str):
 
         if not scenarios:
             run.status = RunStatus.ERROR
+            run.progress_message = "Error: No scenarios to execute"
             run.finished_at = datetime.utcnow()
             db.commit()
             return {"success": False, "error": "No scenarios to execute"}
+
+        update_progress(f"Found {len(scenarios)} scenario(s) to execute")
 
         # Prepare scenario data for executor
         scenario_data = [
@@ -80,12 +124,14 @@ def execute_test_run(self, run_id: str):
         ]
 
         # Fetch custom step definitions
+        update_progress("Loading custom step definitions...")
         custom_steps = {}
         custom_step_records = db.query(CustomStep).all()
         for step in custom_step_records:
             custom_steps[step.pattern] = step.code
 
         # Run the test execution asynchronously
+        update_progress(f"Connecting to {run.browser} browser...")
         loop = asyncio.new_event_loop()
         asyncio.set_event_loop(loop)
 
@@ -97,6 +143,7 @@ def execute_test_run(self, run_id: str):
                     browser=run.browser,
                     base_url=base_url,
                     custom_steps=custom_steps if custom_steps else None,
+                    progress_callback=update_progress,
                 )
             )
         finally:
@@ -109,14 +156,19 @@ def execute_test_run(self, run_id: str):
                 # Map status
                 if step_result.status == "passed":
                     status = StepStatus.PASSED
+                    passed_count += 1
                 elif step_result.status == "failed":
                     status = StepStatus.FAILED
+                    failed_count += 1
                     all_passed = False
                 elif step_result.status == "skipped":
                     status = StepStatus.SKIPPED
                 else:
                     status = StepStatus.ERROR
+                    failed_count += 1
                     all_passed = False
+
+                completed_steps += 1
 
                 # Upload screenshot if available
                 screenshot_url = None
@@ -143,8 +195,21 @@ def execute_test_run(self, run_id: str):
                     screenshot_url=screenshot_url,
                 )
                 db.add(test_result)
+                db.flush()  # Flush to get the result ID
+
+                # Publish result added event via Redis pub/sub
+                run_update_publisher.publish_result_added(
+                    run_id=run_id,
+                    result_id=str(test_result.id),
+                    step_name=step_result.step_name,
+                    status=status.value,
+                    duration_ms=step_result.duration_ms,
+                    error_message=step_result.error_message,
+                    screenshot_url=screenshot_url,
+                )
 
         # Update run status
+        old_status = run.status.value
         if execution_result.status == "error":
             run.status = RunStatus.ERROR
         elif all_passed:
@@ -156,6 +221,28 @@ def execute_test_run(self, run_id: str):
         db.commit()
 
         logger.info(f"Test run {run_id} completed with status {run.status.value}")
+
+        # Publish status update and completion event via Redis pub/sub
+        run_update_publisher.publish_status_update(
+            run_id=run_id,
+            old_status=old_status,
+            new_status=run.status.value,
+            started_at=run.started_at.isoformat() if run.started_at else None,
+            finished_at=run.finished_at.isoformat() if run.finished_at else None,
+        )
+
+        # Calculate final counts for completion message
+        skipped_count = completed_steps - passed_count - failed_count
+        run_update_publisher.publish_completed(
+            run_id=run_id,
+            status=run.status.value,
+            started_at=run.started_at.isoformat() if run.started_at else None,
+            finished_at=run.finished_at.isoformat() if run.finished_at else None,
+            total_results=completed_steps,
+            passed=passed_count,
+            failed=failed_count,
+            skipped=skipped_count if skipped_count > 0 else 0,
+        )
 
         # Generate HTML report
         try:
@@ -180,9 +267,31 @@ def execute_test_run(self, run_id: str):
         try:
             run = db.query(TestRun).filter(TestRun.id == UUID(run_id)).first()
             if run:
+                old_status = run.status.value
                 run.status = RunStatus.ERROR
                 run.finished_at = datetime.utcnow()
+                run.progress_message = f"Error: {str(e)}"
                 db.commit()
+
+                # Publish error and completion events via Redis pub/sub
+                run_update_publisher.publish_error(run_id, str(e))
+                run_update_publisher.publish_status_update(
+                    run_id=run_id,
+                    old_status=old_status,
+                    new_status=run.status.value,
+                    started_at=run.started_at.isoformat() if run.started_at else None,
+                    finished_at=run.finished_at.isoformat() if run.finished_at else None,
+                )
+                run_update_publisher.publish_completed(
+                    run_id=run_id,
+                    status=run.status.value,
+                    started_at=run.started_at.isoformat() if run.started_at else None,
+                    finished_at=run.finished_at.isoformat() if run.finished_at else None,
+                    total_results=completed_steps,
+                    passed=passed_count,
+                    failed=failed_count,
+                    skipped=0,
+                )
         except Exception:
             pass
         raise self.retry(exc=e, countdown=60)  # Retry after 1 minute

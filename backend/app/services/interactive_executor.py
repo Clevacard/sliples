@@ -303,14 +303,22 @@ class InteractiveSession:
             # First, check custom steps
             if custom_steps:
                 for pattern, code in custom_steps.items():
-                    regex = re.compile(pattern, re.IGNORECASE)
-                    match = regex.fullmatch(step_text)
+                    # Convert placeholder pattern {name} to regex capture group
+                    regex_pattern = re.sub(r'\{(\w+)\}', r'(?P<\1>.+)', pattern)
+                    regex_pattern = re.sub(r'\{(\w+):d\}', r'(?P<\1>\\d+)', regex_pattern)
+
+                    try:
+                        regex = re.compile(regex_pattern, re.IGNORECASE)
+                        match = regex.fullmatch(step_text)
+                    except re.error:
+                        continue
+
                     if match:
-                        # Execute custom step code
-                        local_vars = {"page": self._page, "args": match.groups()}
-                        exec(code, {"__builtins__": {}}, local_vars)  # noqa: S102
-                        if "execute" in local_vars and callable(local_vars["execute"]):
-                            await local_vars["execute"]()
+                        # Extract captured parameters
+                        params = match.groupdict()
+
+                        # Execute custom step code with proper async handling
+                        await self._execute_custom_step_code(code, params)
 
                         return await self._create_step_result(
                             step_full, "passed", start_time
@@ -337,6 +345,76 @@ class InteractiveSession:
             return await self._create_step_result(
                 step_full, "failed", start_time, error_message=str(e)
             )
+
+    async def _execute_custom_step_code(self, code: str, params: dict) -> None:
+        """Execute custom step code with proper async handling."""
+        # Extract function body from decorator-style code
+        lines = code.strip().split('\n')
+        func_body_lines = []
+        in_function = False
+        base_indent = None
+
+        for line in lines:
+            if line.strip().startswith(('from ', 'import ', '@')):
+                continue
+            if line.strip().startswith('def '):
+                in_function = True
+                continue
+            if in_function:
+                if line.strip():
+                    if base_indent is None:
+                        base_indent = len(line) - len(line.lstrip())
+                    if len(line) >= base_indent:
+                        func_body_lines.append(line[base_indent:])
+                    else:
+                        func_body_lines.append(line.strip())
+                else:
+                    func_body_lines.append('')
+
+        exec_code = '\n'.join(func_body_lines) if func_body_lines else code
+
+        # Convert sync Playwright calls to async
+        async_code_lines = []
+        async_methods = [
+            '.fill(', '.click(', '.wait_for(', '.type(', '.press(',
+            '.check(', '.uncheck(', '.select_option(', '.hover(',
+            '.focus(', '.blur(', '.scroll_into_view_if_needed(',
+            '.screenshot(', '.inner_text(', '.inner_html(',
+            '.text_content(', '.get_attribute(', '.is_visible(',
+            '.is_enabled(', '.is_checked(', '.evaluate(',
+        ]
+        for line in exec_code.split('\n'):
+            modified_line = line
+            for method in async_methods:
+                if method in modified_line and 'await ' not in modified_line:
+                    stripped = modified_line.lstrip()
+                    indent = modified_line[:len(modified_line) - len(stripped)]
+                    modified_line = indent + 'await ' + stripped
+                    break
+            async_code_lines.append(modified_line)
+
+        async_exec_code = '\n'.join(async_code_lines)
+
+        # Build parameter assignments
+        param_assignments = '\n'.join(
+            f'    {name} = __params__["{name}"]'
+            for name in params.keys()
+        )
+
+        # Indent the code body
+        indented_body = '\n'.join('    ' + line for line in async_exec_code.split('\n'))
+
+        # Wrap in async function
+        wrapped_code = f'''
+async def __custom_step__(page, __params__):
+{param_assignments}
+{indented_body}
+'''
+
+        # Execute
+        exec_globals = {'__builtins__': __builtins__}
+        exec(wrapped_code, exec_globals)  # noqa: S102
+        await exec_globals['__custom_step__'](self._page, params)
 
     async def _create_step_result(
         self,

@@ -2,6 +2,21 @@ import axios from 'axios'
 
 const API_URL = import.meta.env.VITE_API_URL || ''
 
+/**
+ * Get the WebSocket URL for a given path.
+ * Automatically converts http:// to ws:// and https:// to wss://
+ */
+export function getWebSocketUrl(path: string): string {
+  let baseUrl = API_URL || window.location.origin
+  // Convert http(s) to ws(s)
+  baseUrl = baseUrl.replace(/^http/, 'ws')
+  // Ensure path starts with /
+  if (!path.startsWith('/')) {
+    path = '/' + path
+  }
+  return `${baseUrl}${path}`
+}
+
 export const api = axios.create({
   baseURL: `${API_URL}/api/v1`,
   headers: {
@@ -104,6 +119,11 @@ export async function createTestRun(data: {
   browsers?: string[]
 }) {
   const response = await api.post('/runs', data)
+  return response.data
+}
+
+export async function retryTestRun(id: string) {
+  const response = await api.post(`/runs/${id}/retry`)
   return response.data
 }
 
@@ -238,6 +258,34 @@ export async function createApiKey(name: string): Promise<CreateApiKeyResponse> 
 
 export async function revokeApiKey(id: string): Promise<void> {
   await api.delete(`/auth/keys/${id}`)
+}
+
+// System Configuration
+export interface SystemConfig {
+  email?: {
+    configured: boolean
+    host?: string
+    port?: number
+    from_address?: string
+    tls_enabled?: boolean
+  }
+  storage?: {
+    configured: boolean
+    endpoint?: string
+    bucket?: string
+    access_key?: string
+    region?: string
+  }
+  retention?: {
+    default_days: number
+    cleanup_schedule?: string
+    last_cleanup?: string
+  }
+}
+
+export async function getSystemConfig(): Promise<SystemConfig> {
+  const response = await api.get('/settings/system')
+  return response.data
 }
 
 // Custom Steps

@@ -179,20 +179,21 @@ export default function ScenarioEditor() {
                 className={`
                   flex items-center gap-2 px-3 py-1.5 rounded text-sm font-medium transition-colors
                   ${isEditMode
-                    ? 'bg-blue-600 text-white hover:bg-blue-700'
+                    ? 'bg-green-600 text-white hover:bg-green-700'
                     : 'bg-gray-700 text-gray-300 hover:bg-gray-600'
                   }
                   disabled:opacity-50 disabled:cursor-not-allowed
                 `}
+                title={isEditMode ? 'Click to switch to read-only mode' : 'Click to enable editing'}
               >
                 <svg className="w-4 h-4" fill="none" stroke="currentColor" viewBox="0 0 24 24">
                   {isEditMode ? (
-                    <path strokeLinecap="round" strokeLinejoin="round" strokeWidth={2} d="M15 12a3 3 0 11-6 0 3 3 0 016 0z" />
-                  ) : (
                     <path strokeLinecap="round" strokeLinejoin="round" strokeWidth={2} d="M15.232 5.232l3.536 3.536m-2.036-5.036a2.5 2.5 0 113.536 3.536L6.5 21.036H3v-3.572L16.732 3.732z" />
+                  ) : (
+                    <path strokeLinecap="round" strokeLinejoin="round" strokeWidth={2} d="M12 15v2m-6 4h12a2 2 0 002-2v-6a2 2 0 00-2-2H6a2 2 0 00-2 2v6a2 2 0 002 2zm10-10V7a4 4 0 00-8 0v4h8z" />
                   )}
                 </svg>
-                {isEditMode ? 'Viewing' : 'Edit'}
+                {isEditMode ? 'Editing' : 'Read Only'}
               </button>
 
               {/* Discard button */}
@@ -294,7 +295,7 @@ export default function ScenarioEditor() {
                 <>
                   <span>Gherkin</span>
                   <span>|</span>
-                  <span>{isEditMode ? 'Edit Mode' : 'Read Only'}</span>
+                  <span className={isEditMode ? 'text-green-400' : ''}>{isEditMode ? 'Edit Mode' : 'Read Only'}</span>
                   {isDirty && (
                     <>
                       <span>|</span>

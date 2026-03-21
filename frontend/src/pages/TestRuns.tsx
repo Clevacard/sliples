@@ -1,5 +1,5 @@
 import { useEffect, useState, useMemo } from 'react'
-import { Link } from 'react-router-dom'
+import { Link, useNavigate } from 'react-router-dom'
 import { useTestRunsStore, TestRun } from '../store/testRuns'
 import Modal, { ModalFooter } from '../components/Modal'
 import { getScenarios } from '../api/client'
@@ -104,6 +104,7 @@ export default function TestRuns() {
     clearError,
   } = useTestRunsStore()
 
+  const navigate = useNavigate()
   const [showNewRunModal, setShowNewRunModal] = useState(false)
   const [scenarios, setScenarios] = useState<Scenario[]>([])
   const [loadingScenarios, setLoadingScenarios] = useState(false)
@@ -161,7 +162,7 @@ export default function TestRuns() {
     }
 
     try {
-      await createRun({
+      const run = await createRun({
         environment: selectedEnv,
         scenario_tags: selectedTags.length > 0 ? selectedTags : undefined,
         browsers: selectedBrowsers.length > 0 ? selectedBrowsers : ['chromium'],
@@ -170,7 +171,8 @@ export default function TestRuns() {
       setSelectedEnv('')
       setSelectedTags([])
       setSelectedBrowsers(['chromium'])
-      fetchRuns()
+      // Navigate to run details to show progress
+      navigate(`/runs/${run.id}`)
     } catch (error) {
       console.error('Failed to create run:', error)
     }

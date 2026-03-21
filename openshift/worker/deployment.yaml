@@ -1,0 +1,158 @@
+apiVersion: apps/v1
+kind: Deployment
+metadata:
+  name: sliples-worker
+  namespace: sliples
+  labels:
+    app.kubernetes.io/name: sliples
+    app.kubernetes.io/component: worker
+spec:
+  replicas: 3
+  selector:
+    matchLabels:
+      app.kubernetes.io/name: sliples
+      app.kubernetes.io/component: worker
+  strategy:
+    type: RollingUpdate
+    rollingUpdate:
+      maxSurge: 1
+      maxUnavailable: 1
+  template:
+    metadata:
+      labels:
+        app.kubernetes.io/name: sliples
+        app.kubernetes.io/component: worker
+    spec:
+      securityContext:
+        runAsNonRoot: true
+        runAsUser: 1000
+        fsGroup: 1000
+      terminationGracePeriodSeconds: 300  # Allow time for tasks to complete
+      containers:
+        - name: worker
+          image: sliples-backend:latest
+          imagePullPolicy: Always
+          command:
+            - celery
+            - -A
+            - app.workers.celery_app
+            - worker
+            - --loglevel=info
+            - --concurrency=4
+          envFrom:
+            - configMapRef:
+                name: sliples-worker-config
+          env:
+            - name: DATABASE_URL
+              valueFrom:
+                secretKeyRef:
+                  name: sliples-db-credentials
+                  key: DATABASE_URL
+            - name: S3_ACCESS_KEY
+              valueFrom:
+                secretKeyRef:
+                  name: sliples-s3-credentials
+                  key: S3_ACCESS_KEY
+            - name: S3_SECRET_KEY
+              valueFrom:
+                secretKeyRef:
+                  name: sliples-s3-credentials
+                  key: S3_SECRET_KEY
+            - name: TEST_USERNAME
+              valueFrom:
+                secretKeyRef:
+                  name: sliples-test-env-credentials
+                  key: TEST_USERNAME
+                  optional: true
+            - name: TEST_PASSWORD
+              valueFrom:
+                secretKeyRef:
+                  name: sliples-test-env-credentials
+                  key: TEST_PASSWORD
+                  optional: true
+          resources:
+            requests:
+              memory: "512Mi"
+              cpu: "250m"
+            limits:
+              memory: "1Gi"
+              cpu: "1000m"
+          livenessProbe:
+            exec:
+              command:
+                - celery
+                - -A
+                - app.workers.celery_app
+                - inspect
+                - ping
+                - --timeout=10
+            initialDelaySeconds: 30
+            periodSeconds: 60
+            timeoutSeconds: 15
+            failureThreshold: 3
+          securityContext:
+            allowPrivilegeEscalation: false
+            readOnlyRootFilesystem: false
+            capabilities:
+              drop:
+                - ALL
+---
+# Celery Beat Scheduler (single replica)
+apiVersion: apps/v1
+kind: Deployment
+metadata:
+  name: sliples-beat
+  namespace: sliples
+  labels:
+    app.kubernetes.io/name: sliples
+    app.kubernetes.io/component: beat
+spec:
+  replicas: 1  # Must be exactly 1 to avoid duplicate scheduled tasks
+  selector:
+    matchLabels:
+      app.kubernetes.io/name: sliples
+      app.kubernetes.io/component: beat
+  strategy:
+    type: Recreate  # Ensure only one instance runs at a time
+  template:
+    metadata:
+      labels:
+        app.kubernetes.io/name: sliples
+        app.kubernetes.io/component: beat
+    spec:
+      securityContext:
+        runAsNonRoot: true
+        runAsUser: 1000
+        fsGroup: 1000
+      containers:
+        - name: beat
+          image: sliples-backend:latest
+          imagePullPolicy: Always
+          command:
+            - celery
+            - -A
+            - app.workers.celery_app
+            - beat
+            - --loglevel=info
+          envFrom:
+            - configMapRef:
+                name: sliples-worker-config
+          env:
+            - name: DATABASE_URL
+              valueFrom:
+                secretKeyRef:
+                  name: sliples-db-credentials
+                  key: DATABASE_URL
+          resources:
+            requests:
+              memory: "128Mi"
+              cpu: "50m"
+            limits:
+              memory: "256Mi"
+              cpu: "100m"
+          securityContext:
+            allowPrivilegeEscalation: false
+            readOnlyRootFilesystem: false
+            capabilities:
+              drop:
+                - ALL

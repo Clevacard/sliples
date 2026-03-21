@@ -99,6 +99,10 @@ class GherkinStepRegistry:
             r'I clear (?:the )?"([^"]*)"(?: field| input)?',
             self._step_clear,
         )
+        self.register(
+            r'I fill input "([^"]*)" with "([^"]*)"',
+            self._step_fill_selector,
+        )
 
         # Assertion steps
         self.register(
@@ -233,6 +237,10 @@ class GherkinStepRegistry:
     async def _step_fill_reversed(self, page, field: str, value: str):
         """Fill input field (reversed argument order)."""
         await self._step_fill(page, value, field)
+
+    async def _step_fill_selector(self, page, selector: str, value: str):
+        """Fill input by CSS selector."""
+        await page.locator(selector).first.fill(value)
 
     async def _step_clear(self, page, field: str):
         """Clear input field."""
@@ -430,6 +438,110 @@ class TestExecutor:
 
         return steps
 
+    async def _execute_custom_step_code(
+        self,
+        page,
+        code: str,
+        params: dict,
+    ) -> None:
+        """
+        Execute custom step code with proper Playwright context.
+
+        The code can be in two formats:
+        1. pytest-bdd style with decorators (legacy from seed data)
+        2. Simple function body that uses 'page' and named params
+
+        Args:
+            page: Playwright page object
+            code: Python code to execute
+            params: Dict of captured parameters from step pattern
+        """
+        # Try to extract the function body from decorator-style code
+        lines = code.strip().split('\n')
+        func_body_lines = []
+        in_function = False
+        base_indent = None
+
+        for line in lines:
+            # Skip import lines and decorators
+            if line.strip().startswith(('from ', 'import ', '@')):
+                continue
+            # Look for function definition
+            if line.strip().startswith('def '):
+                in_function = True
+                continue
+            # Collect function body
+            if in_function:
+                if line.strip():  # Non-empty line
+                    if base_indent is None:
+                        base_indent = len(line) - len(line.lstrip())
+                    # Dedent to base level
+                    if len(line) >= base_indent:
+                        func_body_lines.append(line[base_indent:])
+                    else:
+                        func_body_lines.append(line.strip())
+                else:
+                    func_body_lines.append('')
+
+        # If we found a function body, use it; otherwise use the whole code
+        if func_body_lines:
+            exec_code = '\n'.join(func_body_lines)
+        else:
+            exec_code = code
+
+        # Convert sync Playwright calls to async by adding 'await'
+        # Common patterns: .fill(), .click(), .wait_for(), .locator(), etc.
+        async_code_lines = []
+        for line in exec_code.split('\n'):
+            modified_line = line
+            # Add await before common Playwright async methods
+            # Pattern: something.method() where method is async
+            async_methods = [
+                '.fill(', '.click(', '.wait_for(', '.type(', '.press(',
+                '.check(', '.uncheck(', '.select_option(', '.hover(',
+                '.focus(', '.blur(', '.scroll_into_view_if_needed(',
+                '.screenshot(', '.inner_text(', '.inner_html(',
+                '.text_content(', '.get_attribute(', '.is_visible(',
+                '.is_enabled(', '.is_checked(', '.evaluate(',
+            ]
+            for method in async_methods:
+                if method in modified_line and 'await ' not in modified_line:
+                    # Find where to insert await (before the expression)
+                    stripped = modified_line.lstrip()
+                    indent = modified_line[:len(modified_line) - len(stripped)]
+                    modified_line = indent + 'await ' + stripped
+                    break
+            async_code_lines.append(modified_line)
+
+        async_exec_code = '\n'.join(async_code_lines)
+
+        # Build parameter assignments
+        param_assignments = '\n'.join(
+            f'    {name} = __params__["{name}"]'
+            for name in params.keys()
+        )
+
+        # Indent the code body
+        indented_body = '\n'.join('    ' + line for line in async_exec_code.split('\n'))
+
+        # Wrap in async function and execute
+        wrapped_code = f'''
+async def __custom_step__(page, __params__):
+{param_assignments}
+{indented_body}
+'''
+
+        # Create execution context
+        exec_globals = {
+            '__builtins__': __builtins__,
+        }
+
+        # Execute to define the function
+        exec(wrapped_code, exec_globals)  # noqa: S102
+
+        # Call and await the function
+        await exec_globals['__custom_step__'](page, params)
+
     async def execute_scenario(
         self,
         scenario_id: str,
@@ -518,15 +630,22 @@ class TestExecutor:
             # First, check custom steps
             if custom_steps:
                 for pattern, code in custom_steps.items():
-                    regex = re.compile(pattern, re.IGNORECASE)
-                    match = regex.fullmatch(step_text)
+                    # Convert placeholder pattern {name} to regex capture group
+                    regex_pattern = re.sub(r'\{(\w+)\}', r'(?P<\1>.+)', pattern)
+                    regex_pattern = re.sub(r'\{(\w+):d\}', r'(?P<\1>\\d+)', regex_pattern)
+
+                    try:
+                        regex = re.compile(regex_pattern, re.IGNORECASE)
+                        match = regex.fullmatch(step_text)
+                    except re.error:
+                        continue
+
                     if match:
-                        # Execute custom step code
-                        # The code has access to 'page' and captured groups as 'args'
-                        local_vars = {"page": page, "args": match.groups()}
-                        exec(code, {"__builtins__": {}}, local_vars)  # noqa: S102
-                        if "execute" in local_vars and callable(local_vars["execute"]):
-                            await local_vars["execute"]()
+                        # Extract captured parameters
+                        params = match.groupdict()
+
+                        # Execute custom step code with proper context
+                        await self._execute_custom_step_code(page, code, params)
 
                         duration_ms = int((time.time() - start_time) * 1000)
 
@@ -598,6 +717,7 @@ async def run_test_execution(
     browser: str,
     base_url: str,
     custom_steps: Optional[dict[str, str]] = None,
+    progress_callback: Optional[Callable[[str], None]] = None,
 ) -> TestExecutionResult:
     """
     Run test execution for a test run.
@@ -608,10 +728,15 @@ async def run_test_execution(
         browser: Browser name
         base_url: Base URL for tests
         custom_steps: Optional custom step definitions
+        progress_callback: Optional callback for progress updates
 
     Returns:
         TestExecutionResult with all scenario results
     """
+    def report_progress(message: str):
+        if progress_callback:
+            progress_callback(message)
+
     result = TestExecutionResult(
         run_id=run_id,
         status="passed",
@@ -622,10 +747,16 @@ async def run_test_execution(
     executor = TestExecutor(browser=browser)
 
     try:
+        report_progress(f"Connecting to {browser} browser...")
         await executor.connect()
+
+        report_progress(f"Creating browser context for {base_url}...")
         await executor.create_context(base_url)
 
-        for scenario in scenarios:
+        total_scenarios = len(scenarios)
+        for idx, scenario in enumerate(scenarios, 1):
+            report_progress(f"Running scenario {idx}/{total_scenarios}: {scenario['name']}")
+
             scenario_result = await executor.execute_scenario(
                 scenario_id=str(scenario["id"]),
                 scenario_name=scenario["name"],
@@ -639,10 +770,14 @@ async def run_test_execution(
             if scenario_result.status != "passed":
                 result.status = "failed"
 
+        report_progress("Finalizing test results...")
+
     except Exception as e:
         logger.error(f"Test execution error: {e}")
         result.status = "error"
+        report_progress(f"Error: {str(e)}")
     finally:
+        report_progress("Closing browser...")
         await executor.disconnect()
 
     result.total_duration_ms = int((time.time() - start_time) * 1000)

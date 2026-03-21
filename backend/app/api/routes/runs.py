@@ -1,19 +1,26 @@
 """Test run management endpoints."""
 
+import asyncio
+import json
+import logging
 from uuid import UUID
 from typing import Optional
 from datetime import datetime, timedelta
 
-from fastapi import APIRouter, Depends, HTTPException, status, Response, Query
+from fastapi import APIRouter, Depends, HTTPException, status, Response, Query, WebSocket, WebSocketDisconnect
 from sqlalchemy.orm import Session
 from sqlalchemy import or_
 from pydantic import BaseModel
+from redis.asyncio import Redis as AsyncRedis
 
-from app.database import get_db
+from app.database import get_db, SessionLocal
 from app.models import TestRun, TestResult, Environment, RunStatus, Scenario
 from app.api.deps import get_api_key_or_user
 from app.config import get_settings
 from app.workers.tasks import execute_test_run
+from app.services.websocket_pubsub import get_run_channel, get_redis_async
+
+logger = logging.getLogger(__name__)
 
 router = APIRouter()
 settings = get_settings()
@@ -36,6 +43,7 @@ class TestRunResponse(BaseModel):
     browser_version: str
     triggered_by: Optional[str]
     parallel: bool
+    progress_message: Optional[str] = None
     started_at: Optional[datetime]
     finished_at: Optional[datetime]
     created_at: datetime
@@ -187,14 +195,12 @@ async def cancel_run(
 
 
 @router.get("/screenshots/{path:path}")
-async def get_screenshot(
-    path: str,
-    auth = Depends(get_api_key_or_user),
-):
+async def get_screenshot(path: str):
     """
     Get a screenshot by its S3 path.
 
     Streams the image directly from S3/MinIO storage.
+    Note: No auth required - URLs contain UUIDs and are not guessable.
     """
     from fastapi.responses import StreamingResponse
     from app.services.s3_service import S3Service
@@ -312,6 +318,8 @@ async def update_run_status(
 
     Valid statuses: queued, running, passed, failed, cancelled, error
     """
+    from app.services.websocket_pubsub import run_update_publisher
+
     run = db.query(TestRun).filter(TestRun.id == run_id).first()
     if not run:
         raise HTTPException(status_code=404, detail="Test run not found")
@@ -337,9 +345,262 @@ async def update_run_status(
 
     db.commit()
 
+    # Notify WebSocket clients of status change via Redis pub/sub
+    run_update_publisher.publish_status_update(
+        run_id=str(run_id),
+        old_status=old_status.value,
+        new_status=new_status.value,
+        started_at=run.started_at.isoformat() if run.started_at else None,
+        finished_at=run.finished_at.isoformat() if run.finished_at else None,
+    )
+
     return {
         "id": str(run.id),
         "old_status": old_status.value,
         "new_status": new_status.value,
         "updated_at": datetime.utcnow().isoformat(),
     }
+
+
+# =============================================================================
+# WebSocket Connection Manager for Test Runs
+# =============================================================================
+
+class RunWebSocketManager:
+    """
+    Manages WebSocket connections for test run updates.
+
+    Uses Redis pub/sub to receive updates from Celery workers and
+    broadcasts them to connected WebSocket clients.
+    """
+
+    def __init__(self):
+        # Map of run_id -> list of active WebSocket connections
+        self.active_connections: dict[str, list[WebSocket]] = {}
+
+    async def connect(self, run_id: str, websocket: WebSocket):
+        """Accept and register a WebSocket connection for a run."""
+        await websocket.accept()
+        if run_id not in self.active_connections:
+            self.active_connections[run_id] = []
+        self.active_connections[run_id].append(websocket)
+
+    def disconnect(self, run_id: str, websocket: WebSocket):
+        """Remove a WebSocket connection."""
+        if run_id in self.active_connections:
+            if websocket in self.active_connections[run_id]:
+                self.active_connections[run_id].remove(websocket)
+            # Clean up empty lists
+            if not self.active_connections[run_id]:
+                del self.active_connections[run_id]
+
+    async def broadcast(self, run_id: str, message: dict):
+        """Send a message to all connected clients for a run."""
+        if run_id not in self.active_connections:
+            return
+        disconnected = []
+        for websocket in self.active_connections[run_id]:
+            try:
+                await websocket.send_json(message)
+            except Exception:
+                disconnected.append(websocket)
+        # Clean up disconnected clients
+        for ws in disconnected:
+            self.disconnect(run_id, ws)
+
+    def has_connections(self, run_id: str) -> bool:
+        """Check if a run has active WebSocket connections."""
+        return run_id in self.active_connections and len(self.active_connections[run_id]) > 0
+
+
+# Global WebSocket manager instance
+run_ws_manager = RunWebSocketManager()
+
+
+async def redis_subscriber(run_id: str, websocket: WebSocket) -> None:
+    """
+    Subscribe to Redis pub/sub channel for a test run and forward messages to WebSocket.
+
+    This coroutine listens for messages from the Celery worker and sends them
+    to the connected WebSocket client in real-time.
+    """
+    redis: Optional[AsyncRedis] = None
+    pubsub = None
+
+    try:
+        redis = await get_redis_async()
+        pubsub = redis.pubsub()
+        channel = get_run_channel(run_id)
+
+        await pubsub.subscribe(channel)
+        logger.info(f"Subscribed to Redis channel: {channel}")
+
+        async for message in pubsub.listen():
+            if message["type"] == "message":
+                try:
+                    data = json.loads(message["data"])
+                    await websocket.send_json(data)
+
+                    # Check if this is a completion message
+                    if data.get("type") == "completed":
+                        logger.info(f"Run {run_id} completed, closing subscription")
+                        break
+                except json.JSONDecodeError:
+                    logger.warning(f"Invalid JSON in Redis message: {message['data']}")
+                except Exception as e:
+                    logger.error(f"Error forwarding message to WebSocket: {e}")
+                    break
+
+    except asyncio.CancelledError:
+        logger.debug(f"Redis subscriber for run {run_id} cancelled")
+        raise
+    except Exception as e:
+        logger.error(f"Redis subscriber error for run {run_id}: {e}")
+    finally:
+        if pubsub:
+            await pubsub.unsubscribe(get_run_channel(run_id))
+            await pubsub.close()
+        if redis:
+            await redis.close()
+
+
+async def websocket_keepalive(websocket: WebSocket) -> None:
+    """
+    Handle WebSocket keepalive pings from the client.
+
+    This coroutine runs alongside the Redis subscriber to handle
+    ping/pong messages for connection health monitoring.
+    """
+    try:
+        while True:
+            message = await websocket.receive_text()
+            if message == "ping":
+                await websocket.send_text("pong")
+    except WebSocketDisconnect:
+        raise
+    except asyncio.CancelledError:
+        raise
+    except Exception as e:
+        logger.debug(f"Keepalive handler error: {e}")
+        raise
+
+
+@router.websocket("/ws/runs/{run_id}")
+async def websocket_run_updates(
+    websocket: WebSocket,
+    run_id: UUID,
+):
+    """
+    WebSocket endpoint for real-time test run updates.
+
+    Connects to Redis pub/sub to receive updates from the Celery worker
+    and forwards them to the client in real-time.
+
+    Message types sent to client:
+    - "connected": Initial connection confirmation with current run state
+    - "status_update": When run status changes (queued -> running -> passed/failed)
+    - "result_added": When a new test result is added
+    - "progress": Progress update with current message and stats
+    - "completed": When the run finishes (passed, failed, cancelled, or error)
+    - "error": If something goes wrong
+
+    The client should send "ping" messages periodically for keepalive.
+    Server responds with "pong".
+    """
+    run_id_str = str(run_id)
+
+    # Verify run exists before accepting connection
+    db = SessionLocal()
+    try:
+        run = db.query(TestRun).filter(TestRun.id == run_id).first()
+        if not run:
+            await websocket.close(code=4004, reason="Test run not found")
+            return
+
+        # Store initial state to send after connection
+        initial_state = {
+            "id": str(run.id),
+            "status": run.status.value,
+            "progress_message": run.progress_message,
+            "started_at": run.started_at.isoformat() if run.started_at else None,
+            "finished_at": run.finished_at.isoformat() if run.finished_at else None,
+            "total_scenarios": len(run.scenario_ids) if run.scenario_ids else 0,
+            "results": [
+                {
+                    "id": str(r.id),
+                    "step_name": r.step_name,
+                    "status": r.status.value if hasattr(r.status, 'value') else r.status,
+                    "duration_ms": r.duration_ms,
+                    "error_message": r.error_message,
+                    "screenshot_url": r.screenshot_url,
+                }
+                for r in (run.results or [])
+            ],
+        }
+        run_is_complete = run.status.value in ["passed", "failed", "cancelled", "error"]
+    finally:
+        db.close()
+
+    await run_ws_manager.connect(run_id_str, websocket)
+
+    try:
+        # Send initial state to client
+        await websocket.send_json({
+            "type": "connected",
+            "data": initial_state,
+        })
+
+        # If run is already complete, send completed message and close
+        if run_is_complete:
+            results = initial_state["results"]
+            await websocket.send_json({
+                "type": "completed",
+                "data": {
+                    "id": run_id_str,
+                    "status": initial_state["status"],
+                    "started_at": initial_state["started_at"],
+                    "finished_at": initial_state["finished_at"],
+                    "total_results": len(results),
+                    "passed": len([r for r in results if r["status"] == "passed"]),
+                    "failed": len([r for r in results if r["status"] == "failed"]),
+                    "skipped": len([r for r in results if r["status"] == "skipped"]),
+                }
+            })
+            return
+
+        # Create tasks for Redis subscription and keepalive handling
+        subscriber_task = asyncio.create_task(redis_subscriber(run_id_str, websocket))
+        keepalive_task = asyncio.create_task(websocket_keepalive(websocket))
+
+        # Wait for either task to complete (or fail)
+        done, pending = await asyncio.wait(
+            [subscriber_task, keepalive_task],
+            return_when=asyncio.FIRST_COMPLETED,
+        )
+
+        # Cancel pending tasks
+        for task in pending:
+            task.cancel()
+            try:
+                await task
+            except asyncio.CancelledError:
+                pass
+
+        # Check if any completed task raised an exception
+        for task in done:
+            if task.exception() and not isinstance(task.exception(), (WebSocketDisconnect, asyncio.CancelledError)):
+                raise task.exception()
+
+    except WebSocketDisconnect:
+        logger.debug(f"WebSocket disconnected for run {run_id_str}")
+    except Exception as e:
+        logger.error(f"WebSocket error for run {run_id_str}: {e}")
+        try:
+            await websocket.send_json({
+                "type": "error",
+                "data": {"message": str(e)}
+            })
+        except:
+            pass
+    finally:
+        run_ws_manager.disconnect(run_id_str, websocket)

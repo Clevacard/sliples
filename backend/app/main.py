@@ -5,7 +5,7 @@ from contextlib import asynccontextmanager
 from fastapi import FastAPI
 from fastapi.middleware.cors import CORSMiddleware
 
-from app.api.routes import health, environments, scenarios, runs, repos, steps, browsers, auth, users, schedules, seed, test_session
+from app.api.routes import health, environments, scenarios, runs, repos, steps, browsers, auth, users, schedules, seed, test_session, settings
 from app.config import get_settings
 from app.database import engine
 from app.models import Base
@@ -51,6 +51,7 @@ app.include_router(users.router, prefix="/api/v1", tags=["Users"])
 app.include_router(schedules.router, prefix="/api/v1", tags=["Schedules"])
 app.include_router(seed.router, prefix="/api/v1", tags=["Seed Data"])
 app.include_router(test_session.router, prefix="/api/v1", tags=["Test Sessions"])
+app.include_router(settings.router, prefix="/api/v1", tags=["Settings"])
 
 
 @app.get("/")

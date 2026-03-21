@@ -1,0 +1,20 @@
+apiVersion: route.openshift.io/v1
+kind: Route
+metadata:
+  name: sliples-frontend
+  namespace: sliples
+  labels:
+    app.kubernetes.io/name: sliples
+    app.kubernetes.io/component: frontend
+spec:
+  host: sliples.apps.example.com
+  to:
+    kind: Service
+    name: sliples-frontend-svc
+    weight: 100
+  port:
+    targetPort: http
+  tls:
+    termination: edge
+    insecureEdgeTerminationPolicy: Redirect
+  wildcardPolicy: None
