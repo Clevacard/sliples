@@ -8,6 +8,8 @@ Feature: Giftstarr Card Balance Check
   Scenario: Check gift card balance with valid token
     Given I navigate to "https://test.giftstarr.cards"
     Then I should see "card token"
-    When I fill input "input" with "000000002"
+    When I fill in the token 000000003
     And I click "Go!"
-    Then I should see "Balance"
+    Then I should see "Your card balance:"
+    Then I should see "GBP 10"
+    Then I should see "valid until: 2025-12-17"

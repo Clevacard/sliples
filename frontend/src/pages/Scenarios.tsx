@@ -1,6 +1,6 @@
 import { useEffect, useState, useMemo } from 'react'
 import { Link, useNavigate } from 'react-router-dom'
-import { getScenarios, getRepos, syncRepo, createScenario, deleteScenario } from '../api/client'
+import { getScenarios, getRepos, createScenario, deleteScenario, syncScenarios } from '../api/client'
 
 interface Scenario {
   id: string
@@ -113,24 +113,15 @@ Feature: New Feature
   }, [filteredScenarios])
 
   const handleSyncAll = async () => {
-    for (const repo of repos) {
-      await handleSyncRepo(repo.id)
-    }
-    // Refresh scenarios after sync
+    setSyncing('all')
     try {
+      await syncScenarios()
+      // Refresh scenarios after sync
       const data = await getScenarios()
       setScenarios(Array.isArray(data) ? data : data.items || [])
     } catch (error) {
-      console.error('Failed to refresh scenarios:', error)
-    }
-  }
-
-  const handleSyncRepo = async (repoId: string) => {
-    setSyncing(repoId)
-    try {
-      await syncRepo(repoId)
-    } catch (error) {
-      console.error('Failed to sync repo:', error)
+      console.error('Failed to sync scenarios:', error)
+      alert('Failed to sync scenarios from filesystem')
     } finally {
       setSyncing(null)
     }
@@ -213,7 +204,7 @@ Feature: New Feature
         <div>
           <h1 className="text-3xl font-bold text-gray-100">Scenarios</h1>
           <p className="text-gray-400 mt-1">
-            {scenarios.length} scenarios from {repos.length} repositories
+            {scenarios.length} scenarios
           </p>
         </div>
         <div className="flex gap-3">
@@ -228,7 +219,7 @@ Feature: New Feature
           </button>
           <button
             onClick={handleSyncAll}
-            disabled={syncing !== null || repos.length === 0}
+            disabled={syncing !== null}
             className="btn btn-secondary flex items-center gap-2"
           >
             <svg
@@ -244,7 +235,7 @@ Feature: New Feature
               d="M4 4v5h.582m15.356 2A8.001 8.001 0 004.582 9m0 0H9m11 11v-5h-.581m0 0a8.003 8.003 0 01-15.357-2m15.357 2H15"
             />
           </svg>
-          Sync All Repos
+          Sync from Disk
           </button>
         </div>
       </div>

@@ -24,9 +24,7 @@ Feature: Giftstarr Homepage
   @smoke
   Scenario: Homepage displays key sections
     When I navigate to "/"
-    Then I should see the hero banner
-    And I should see the "Popular Gift Cards" section
-    And I should see the "Categories" section
+    Then I should see the card artwork
     And I should see the footer
 
   @regression
@@ -63,21 +61,7 @@ Feature: Giftstarr Homepage
     When I navigate to "/"
     And I click on the language selector
     Then I should see available languages
-    When I select "Nederlands"
-    Then the page should display in Dutch
+    When I select "ES"
+    Then the page should display in Spanish
 
-  @smoke
-  Scenario: Homepage search bar is visible and functional
-    When I navigate to "/"
-    Then I should see the search bar
-    When I enter "Amazon" in the search bar
-    Then I should see search suggestions
-    When I press Enter
-    Then I should see search results for "Amazon"
 
-  @regression
-  Scenario: Homepage displays trust indicators
-    When I navigate to "/"
-    Then I should see payment method icons
-    And I should see security badges
-    And I should see customer review ratings

@@ -116,6 +116,11 @@ export async function deleteScenario(id: string) {
   await api.delete(`/scenarios/${id}`)
 }
 
+export async function syncScenarios() {
+  const response = await api.post('/scenarios/sync')
+  return response.data
+}
+
 // Test Runs
 export async function getTestRuns(params?: { status?: string; limit?: number }) {
   const response = await api.get('/runs', { params })

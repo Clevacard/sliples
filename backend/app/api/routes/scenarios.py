@@ -12,7 +12,7 @@ from pydantic import BaseModel
 from app.database import get_db
 from app.models import Scenario, ScenarioRepo
 from app.api.deps import get_api_key_or_user
-from app.workers.tasks import sync_all_repositories
+from app.services.filesystem_sync import sync_filesystem_to_db
 
 router = APIRouter()
 
@@ -209,28 +209,17 @@ async def sync_scenarios(
     auth = Depends(get_api_key_or_user),
 ):
     """
-    Sync scenarios from all configured repositories.
+    Sync scenarios from the local /scenarios filesystem folder.
 
-    This triggers background tasks to:
-    1. Clone/pull each repository
-    2. Parse all .feature files
-    3. Update the database with extracted scenarios
+    This scans all .feature files and:
+    1. Adds new scenarios found on disk
+    2. Updates scenarios whose content has changed
+    3. Removes scenarios whose files have been deleted
     """
-    repos = db.query(ScenarioRepo).all()
-
-    if not repos:
-        return {
-            "status": "no_repos",
-            "message": "No repositories configured. Add a repository first.",
-            "synced_count": 0,
-        }
-
-    # Queue the sync task
-    task = sync_all_repositories.delay()
+    stats = sync_filesystem_to_db(db)
 
     return {
-        "status": "sync_queued",
-        "message": f"Sync started for {len(repos)} repositories",
-        "task_id": task.id,
-        "repos": [{"id": str(r.id), "name": r.name} for r in repos],
+        "status": "synced",
+        "message": f"Scanned {stats['scanned']} files: {stats['added']} added, {stats['updated']} updated, {stats['deleted']} deleted",
+        "stats": stats,
     }
