@@ -65,6 +65,7 @@ class TestResult(Base):
     id = Column(UUID(as_uuid=True), primary_key=True, default=uuid.uuid4)
     test_run_id = Column(UUID(as_uuid=True), ForeignKey("test_runs.id"), nullable=False)
     scenario_id = Column(UUID(as_uuid=True), nullable=True)
+    scenario_name = Column(String(255), nullable=True)
     step_name = Column(String(500), nullable=False)
     status = Column(SQLEnum(StepStatus), default=StepStatus.PENDING)
     duration_ms = Column(Integer, default=0)

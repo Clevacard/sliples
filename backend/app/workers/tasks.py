@@ -188,6 +188,7 @@ def execute_test_run(self, run_id: str):
                 test_result = TestResult(
                     test_run_id=UUID(run_id),
                     scenario_id=UUID(scenario_result.scenario_id),
+                    scenario_name=scenario_result.scenario_name,
                     step_name=step_result.step_name,
                     status=status,
                     duration_ms=step_result.duration_ms,

@@ -54,6 +54,8 @@ class TestRunResponse(BaseModel):
 
 class TestResultResponse(BaseModel):
     id: UUID
+    scenario_id: Optional[UUID] = None
+    scenario_name: Optional[str] = None
     step_name: str
     status: str
     duration_ms: int

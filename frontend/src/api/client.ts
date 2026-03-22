@@ -101,6 +101,21 @@ export async function getScenario(id: string) {
   return response.data
 }
 
+export async function createScenario(data: {
+  name: string
+  feature_path: string
+  content: string
+  tags?: string[]
+  repo_id?: string
+}) {
+  const response = await api.post('/scenarios', data)
+  return response.data
+}
+
+export async function deleteScenario(id: string) {
+  await api.delete(`/scenarios/${id}`)
+}
+
 // Test Runs
 export async function getTestRuns(params?: { status?: string; limit?: number }) {
   const response = await api.get('/runs', { params })
