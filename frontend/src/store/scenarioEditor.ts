@@ -169,7 +169,8 @@ export const useScenarioEditorStore = create<ScenarioEditorState>((set, get) => 
       if (!confirmed) return
     }
 
-    set({ loading: true, error: null })
+    // Clear current content immediately to avoid showing stale data
+    set({ loading: true, error: null, content: '', originalContent: '' })
     try {
       const data = await getScenarioContent(scenarioId)
       set({
