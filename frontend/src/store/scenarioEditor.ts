@@ -75,30 +75,52 @@ export const useScenarioEditorStore = create<ScenarioEditorState>((set, get) => 
   loadFileTree: async () => {
     set({ loadingTree: true, error: null })
     try {
-      const [scenarios, repos] = await Promise.all([
+      const [scenarios] = await Promise.all([
         getScenarios(),
         getRepos(),
       ])
 
       const scenarioList = Array.isArray(scenarios) ? scenarios : scenarios.items || []
-      const repoList = Array.isArray(repos) ? repos : repos.items || []
 
-      // Build tree structure: repos -> features -> scenarios
-      const repoMap = new Map<string, FileTreeNode>()
+      // Build tree structure from folder paths
+      const root: FileTreeNode = {
+        id: 'root',
+        name: 'scenarios',
+        type: 'folder',
+        path: 'scenarios',
+        children: [],
+        expanded: true,
+      }
 
-      // Initialize repos
-      repoList.forEach((repo: { id: string; name: string }) => {
-        repoMap.set(repo.id, {
-          id: `repo-${repo.id}`,
-          name: repo.name,
-          type: 'repo',
-          path: repo.name,
-          children: [],
-          expanded: false,
-        })
-      })
+      // Helper to find or create a folder node at a given path
+      const getOrCreateFolder = (parentNode: FileTreeNode, pathParts: string[], currentPath: string): FileTreeNode => {
+        if (pathParts.length === 0) return parentNode
 
-      // Group scenarios by repo and feature path
+        const folderName = pathParts[0]
+        const folderPath = currentPath ? `${currentPath}/${folderName}` : folderName
+        const folderId = `folder-${folderPath}`
+
+        let folderNode = parentNode.children?.find((n) => n.id === folderId)
+        if (!folderNode) {
+          folderNode = {
+            id: folderId,
+            name: folderName,
+            type: 'folder',
+            path: folderPath,
+            children: [],
+            expanded: false,
+          }
+          parentNode.children = parentNode.children || []
+          parentNode.children.push(folderNode)
+        }
+
+        // Recurse for remaining path parts
+        return getOrCreateFolder(folderNode, pathParts.slice(1), folderPath)
+      }
+
+      // Group scenarios by feature file, then add to tree
+      const featureMap = new Map<string, typeof scenarioList>()
+
       scenarioList.forEach((scenario: {
         id: string
         name: string
@@ -106,51 +128,72 @@ export const useScenarioEditorStore = create<ScenarioEditorState>((set, get) => 
         repo_id?: string
         tags?: string[]
       }) => {
-        const repoId = scenario.repo_id || 'unknown'
-        let repoNode = repoMap.get(repoId)
-
-        if (!repoNode) {
-          repoNode = {
-            id: `repo-${repoId}`,
-            name: 'Unknown Repository',
-            type: 'repo',
-            path: 'unknown',
-            children: [],
-            expanded: false,
-          }
-          repoMap.set(repoId, repoNode)
-        }
-
-        // Find or create feature file node
         const featurePath = scenario.feature_path || 'unknown.feature'
-        const featureNodeId = `feature-${repoId}-${featurePath}`
-        let featureNode = repoNode.children?.find((n) => n.id === featureNodeId)
+        if (!featureMap.has(featurePath)) {
+          featureMap.set(featurePath, [])
+        }
+        featureMap.get(featurePath)!.push(scenario)
+      })
+
+      // Build tree from feature paths
+      featureMap.forEach((scenarios, featurePath) => {
+        // Parse path: "scenarios/giftstarr/homepage.feature" -> ["scenarios", "giftstarr", "homepage.feature"]
+        const parts = featurePath.split('/').filter(Boolean)
+        const fileName = parts.pop() || featurePath
+
+        // Create folder structure
+        const parentFolder = getOrCreateFolder(root, parts, '')
+
+        // Create feature file node
+        const featureNodeId = `feature-${featurePath}`
+        let featureNode = parentFolder.children?.find((n) => n.id === featureNodeId)
 
         if (!featureNode) {
           featureNode = {
             id: featureNodeId,
-            name: featurePath.split('/').pop() || featurePath,
+            name: fileName,
             type: 'folder',
             path: featurePath,
             children: [],
-            repoId,
             expanded: false,
           }
-          repoNode.children?.push(featureNode)
+          parentFolder.children = parentFolder.children || []
+          parentFolder.children.push(featureNode)
         }
 
-        // Add scenario as file node
-        featureNode.children?.push({
-          id: `scenario-${scenario.id}`,
-          name: scenario.name,
-          type: 'file',
-          path: `${featurePath}#${scenario.name}`,
-          scenarioId: scenario.id,
-          repoId,
+        // Add scenarios as file nodes
+        scenarios.forEach((scenario) => {
+          featureNode!.children = featureNode!.children || []
+          featureNode!.children.push({
+            id: `scenario-${scenario.id}`,
+            name: scenario.name,
+            type: 'file',
+            path: `${featurePath}#${scenario.name}`,
+            scenarioId: scenario.id,
+          })
         })
       })
 
-      const tree = Array.from(repoMap.values())
+      // Sort children alphabetically at each level
+      const sortChildren = (node: FileTreeNode) => {
+        if (node.children) {
+          node.children.sort((a, b) => {
+            // Folders first, then files
+            if (a.type !== b.type) {
+              return a.type === 'folder' ? -1 : 1
+            }
+            return a.name.localeCompare(b.name)
+          })
+          node.children.forEach(sortChildren)
+        }
+      }
+      sortChildren(root)
+
+      // Use root's children as the tree (skip the root "scenarios" node if it only has one child)
+      const tree = root.children && root.children.length === 1 && root.children[0].type === 'folder'
+        ? [root.children[0]]
+        : root.children || []
+
       set({ fileTree: tree })
     } catch (error) {
       const message = error instanceof Error ? error.message : 'Failed to load file tree'
