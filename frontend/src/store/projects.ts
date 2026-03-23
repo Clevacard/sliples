@@ -1,8 +1,6 @@
 import { create } from 'zustand'
-import { persist } from 'zustand/middleware'
 import {
   getProjects,
-  getProject,
   createProject as apiCreateProject,
   updateProject as apiUpdateProject,
   deleteProject as apiDeleteProject,
@@ -40,11 +38,6 @@ interface ProjectsState {
   updateMemberRole: (projectId: string, userId: string, role: ProjectRole) => Promise<ProjectMember>
   removeMember: (projectId: string, userId: string) => Promise<void>
   clearError: () => void
-}
-
-// Separate persisted state for current project ID
-interface PersistedProjectState {
-  currentProjectId: string | null
 }
 
 export const useProjectsStore = create<ProjectsState>()((set, get) => ({

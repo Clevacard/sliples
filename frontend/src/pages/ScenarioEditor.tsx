@@ -3,7 +3,7 @@ import { useParams, useNavigate } from 'react-router-dom'
 import GherkinEditor from '../components/GherkinEditor'
 import ScenarioTree from '../components/ScenarioTree'
 import { useScenarioEditorStore } from '../store/scenarioEditor'
-import { validateGherkinSteps, type ParseResponse, type StepValidation } from '../api/client'
+import { validateGherkinSteps, type ParseResponse } from '../api/client'
 
 export default function ScenarioEditor() {
   const { id } = useParams<{ id: string }>()

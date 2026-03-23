@@ -21,7 +21,7 @@ interface PagesState {
   clearError: () => void
 }
 
-export const usePagesStore = create<PagesState>((set, get) => ({
+export const usePagesStore = create<PagesState>((set) => ({
   // Initial state
   pages: [],
   selectedPage: null,
