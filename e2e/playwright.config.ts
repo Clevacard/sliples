@@ -35,7 +35,8 @@ export default defineConfig({
   // Shared settings for all projects
   use: {
     // Base URL to use in actions like `await page.goto('/')`
-    baseURL: 'https://sliples.localhost.in:5173',
+    // Use SLIPLES_URL env var for deployed environment, default to local dev
+    baseURL: process.env.SLIPLES_URL || 'https://sliples.localhost.in:5173',
 
     // Collect trace on first retry and when explicitly requested
     trace: 'on',

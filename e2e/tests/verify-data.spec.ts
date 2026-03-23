@@ -1,11 +1,17 @@
 /**
  * E2E test to verify sample data is visible in the UI.
  * Uses API key authentication stored in localStorage.
+ *
+ * NOTE: These tests verify local dev seed data and are skipped in production.
  */
 import { test, expect } from '@playwright/test';
 
+// Skip these tests in production (they check for local seed data)
+const isProduction = process.env.SLIPLES_URL?.includes('agantis.in');
+test.skip(!!isProduction, 'Skipping seed data verification tests in production');
+
 // The development API key created earlier
-const API_KEY = 'P9K05ahFmX8DUAco5EEOBVg3rM_zbd7pVEo-I2pbsaI';
+const API_KEY = process.env.SLIPLES_API_KEY || 'P9K05ahFmX8DUAco5EEOBVg3rM_zbd7pVEo-I2pbsaI';
 
 const TEST_USER = {
   id: '11111111-1111-1111-1111-111111111111',

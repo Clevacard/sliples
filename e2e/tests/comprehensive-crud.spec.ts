@@ -16,9 +16,13 @@
 
 import { test, expect } from '@playwright/test';
 
-// API configuration
-const API_KEY = 'P9K05ahFmX8DUAco5EEOBVg3rM_zbd7pVEo-I2pbsaI';
-const API_BASE = 'http://localhost:8000/api/v1';
+// API configuration - use environment variables for deployment
+const API_KEY = process.env.SLIPLES_API_KEY || 'P9K05ahFmX8DUAco5EEOBVg3rM_zbd7pVEo-I2pbsaI';
+const SLIPLES_URL = process.env.SLIPLES_URL || 'https://sliples.localhost.in:5173';
+// For local dev with port 5173, API is on 8000; for deployed, API is same host
+const API_BASE = SLIPLES_URL.includes('localhost')
+  ? SLIPLES_URL.replace(':5173', ':8000') + '/api/v1'
+  : SLIPLES_URL + '/api/v1';
 
 // Test user for auth mocking
 const TEST_USER = {
@@ -81,7 +85,7 @@ test.describe('Environments CRUD', () => {
     await page.goto('/environments');
     await page.waitForLoadState('networkidle');
 
-    await expect(page.getByRole('heading', { name: /environments/i })).toBeVisible();
+    await expect(page.getByRole('heading', { name: 'Environments', exact: true })).toBeVisible();
     await page.screenshot({ path: 'screenshots/environments-list.png', fullPage: true });
 
     console.log('ENVIRONMENTS LIST: PASSED');
@@ -232,7 +236,7 @@ test.describe('Repositories CRUD', () => {
     await page.goto('/repos');
     await page.waitForLoadState('networkidle');
 
-    await expect(page.getByRole('heading', { name: /repositories/i })).toBeVisible();
+    await expect(page.getByRole('heading', { name: 'Repositories', exact: true })).toBeVisible();
     await page.screenshot({ path: 'screenshots/repos-list.png', fullPage: true });
 
     console.log('REPOS LIST: PASSED');
@@ -566,7 +570,7 @@ test.describe('Schedules CRUD', () => {
     await page.goto('/schedules');
     await page.waitForLoadState('networkidle');
 
-    await expect(page.getByRole('heading', { name: /schedules/i })).toBeVisible();
+    await expect(page.getByRole('heading', { name: 'Schedules', exact: true })).toBeVisible();
     await page.screenshot({ path: 'screenshots/schedules-list.png', fullPage: true });
 
     console.log('SCHEDULES LIST: PASSED');
@@ -581,7 +585,7 @@ test.describe('Schedules CRUD', () => {
     const scheduleData = {
       name: `E2E Test Schedule ${Date.now()}`,
       cron_expression: '0 9 * * 1-5',
-      environment_id: testEnvironmentId,
+      environment_ids: [testEnvironmentId],
       scenario_tags: ['smoke'],
       browsers: ['chromium'],
       enabled: false, // Don't actually run
@@ -761,7 +765,7 @@ test.describe('Custom Steps CRUD', () => {
     await page.goto('/custom-steps');
     await page.waitForLoadState('networkidle');
 
-    await expect(page.getByRole('heading', { name: /custom steps/i })).toBeVisible();
+    await expect(page.getByRole('heading', { name: 'Custom Steps', exact: true })).toBeVisible();
     await page.screenshot({ path: 'screenshots/custom-steps-list.png', fullPage: true });
 
     console.log('CUSTOM STEPS LIST: PASSED');

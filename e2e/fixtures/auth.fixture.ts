@@ -2,13 +2,23 @@ import { test as base, expect, Page } from '@playwright/test';
 import path from 'path';
 import jwt from 'jsonwebtoken';
 
-// Real API key for testing
-const TEST_API_KEY = 'P9K05ahFmX8DUAco5EEOBVg3rM_zbd7pVEo-I2pbsaI';
+// Real API key for testing (from env or default for local dev)
+const TEST_API_KEY = process.env.SLIPLES_API_KEY || 'P9K05ahFmX8DUAco5EEOBVg3rM_zbd7pVEo-I2pbsaI';
 
 // JWT settings (must match backend configuration)
-const JWT_SECRET_KEY = 'sliples-jwt-secret-change-in-prod';
+const JWT_SECRET_KEY = process.env.JWT_SECRET_KEY || 'sliples-jwt-secret-change-in-prod';
 const JWT_ALGORITHM = 'HS256';
 const JWT_EXPIRY_HOURS = 24;
+
+// Get domain from SLIPLES_URL or default to local dev
+function getCookieDomain(): string {
+  const url = process.env.SLIPLES_URL || 'https://sliples.localhost.in:5173';
+  try {
+    return new URL(url).hostname;
+  } catch {
+    return 'sliples.localhost.in';
+  }
+}
 
 // User credentials for testing - using real test user
 export interface TestUser {
@@ -76,7 +86,7 @@ export async function mockAuthenticatedState(page: Page, user: TestUser = testUs
     {
       name: 'access_token',
       value: jwtToken,
-      domain: 'sliples.localhost.in',
+      domain: getCookieDomain(),
       path: '/',
       httpOnly: true,
       secure: true,

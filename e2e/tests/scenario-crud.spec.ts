@@ -1,13 +1,22 @@
 /**
  * E2E tests for Scenario CRUD operations.
  * Tests create, read, update, and delete functionality for scenarios.
+ *
+ * NOTE: Some tests require seed data and are skipped in production.
  */
 import { test, expect } from '@playwright/test';
 import { mockAuthenticatedState, testUsers } from '../fixtures/auth.fixture';
 
 // API key for direct API calls
-const API_KEY = 'P9K05ahFmX8DUAco5EEOBVg3rM_zbd7pVEo-I2pbsaI';
-const API_BASE = 'http://localhost:8000/api/v1';
+const API_KEY = process.env.SLIPLES_API_KEY || 'P9K05ahFmX8DUAco5EEOBVg3rM_zbd7pVEo-I2pbsaI';
+const SLIPLES_URL = process.env.SLIPLES_URL || 'https://sliples.localhost.in:5173';
+// For local dev with port 5173, API is on 8000; for deployed, API is same host
+const API_BASE = SLIPLES_URL.includes('localhost')
+  ? SLIPLES_URL.replace(':5173', ':8000') + '/api/v1'
+  : SLIPLES_URL + '/api/v1';
+
+// Check if running in production
+const isProduction = process.env.SLIPLES_URL?.includes('agantis.in');
 
 test.describe('Scenario CRUD Operations', () => {
   let createdScenarioId: string | null = null;
@@ -32,6 +41,8 @@ test.describe('Scenario CRUD Operations', () => {
 
   test.describe('Read Operations', () => {
     test('should view scenario list', async ({ page }) => {
+      test.skip(!!isProduction, 'Skipping seed data test in production');
+
       await page.goto('/scenarios');
       await page.waitForLoadState('networkidle');
 
@@ -50,6 +61,8 @@ test.describe('Scenario CRUD Operations', () => {
     });
 
     test('should view scenario content', async ({ page }) => {
+      test.skip(!!isProduction, 'Skipping seed data test in production');
+
       await page.goto('/scenarios');
       await page.waitForLoadState('networkidle');
 
@@ -124,6 +137,8 @@ test.describe('Scenario CRUD Operations', () => {
     });
 
     test('should update scenario content via UI', async ({ page }) => {
+      test.skip(!!isProduction, 'Skipping seed data test in production');
+
       await page.goto('/scenarios');
       await page.waitForLoadState('networkidle');
 
