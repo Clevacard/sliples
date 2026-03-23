@@ -125,6 +125,7 @@ spec:
             - app.workers.celery_app
             - beat
             - --loglevel=info
+            - --schedule=/tmp/celerybeat-schedule
           envFrom:
             - configMapRef:
                 name: sliples-worker-config
@@ -141,7 +142,6 @@ spec:
             limits:
               memory: "256Mi"
               cpu: "100m"
-            allowPrivilegeEscalation: false
             readOnlyRootFilesystem: false
             capabilities:
               drop:

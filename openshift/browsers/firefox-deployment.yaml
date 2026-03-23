@@ -33,6 +33,10 @@ spec:
             - run-server
             - --port=3000
           env:
+            - name: HOME
+              value: /tmp
+            - name: npm_config_cache
+              value: /tmp/.npm
             - name: BROWSER
               value: "firefox"
           ports:
@@ -60,10 +64,6 @@ spec:
             periodSeconds: 10
             timeoutSeconds: 5
             failureThreshold: 3
-            allowPrivilegeEscalation: false
-            capabilities:
-              drop:
-                - ALL
           volumeMounts:
             - name: shm
               mountPath: /dev/shm
