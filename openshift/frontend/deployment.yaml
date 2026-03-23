@@ -23,10 +23,6 @@ spec:
         app.kubernetes.io/name: sliples
         app.kubernetes.io/component: frontend
     spec:
-      securityContext:
-        runAsNonRoot: true
-        runAsUser: 101  # nginx user
-        fsGroup: 101
       containers:
         - name: frontend
           image: sliples-frontend:latest
@@ -58,7 +54,6 @@ spec:
             periodSeconds: 10
             timeoutSeconds: 5
             failureThreshold: 3
-          securityContext:
             allowPrivilegeEscalation: false
             readOnlyRootFilesystem: false
             capabilities:

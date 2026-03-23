@@ -23,10 +23,6 @@ spec:
         app.kubernetes.io/name: sliples
         app.kubernetes.io/component: worker
     spec:
-      securityContext:
-        runAsNonRoot: true
-        runAsUser: 1000
-        fsGroup: 1000
       terminationGracePeriodSeconds: 300  # Allow time for tasks to complete
       containers:
         - name: worker
@@ -90,7 +86,6 @@ spec:
             periodSeconds: 60
             timeoutSeconds: 15
             failureThreshold: 3
-          securityContext:
             allowPrivilegeEscalation: false
             readOnlyRootFilesystem: false
             capabilities:
@@ -120,10 +115,6 @@ spec:
         app.kubernetes.io/name: sliples
         app.kubernetes.io/component: beat
     spec:
-      securityContext:
-        runAsNonRoot: true
-        runAsUser: 1000
-        fsGroup: 1000
       containers:
         - name: beat
           image: sliples-backend:latest
@@ -150,7 +141,6 @@ spec:
             limits:
               memory: "256Mi"
               cpu: "100m"
-          securityContext:
             allowPrivilegeEscalation: false
             readOnlyRootFilesystem: false
             capabilities:

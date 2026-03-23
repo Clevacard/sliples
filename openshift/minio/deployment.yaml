@@ -20,10 +20,6 @@ spec:
         app.kubernetes.io/name: sliples
         app.kubernetes.io/component: minio
     spec:
-      securityContext:
-        runAsNonRoot: true
-        runAsUser: 1000
-        fsGroup: 1000
       containers:
         - name: minio
           image: minio/minio:latest
@@ -77,12 +73,6 @@ spec:
           volumeMounts:
             - name: minio-data
               mountPath: /data
-          securityContext:
-            allowPrivilegeEscalation: false
-            readOnlyRootFilesystem: false
-            capabilities:
-              drop:
-                - ALL
       volumes:
         - name: minio-data
           persistentVolumeClaim:

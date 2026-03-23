@@ -20,10 +20,6 @@ spec:
         app.kubernetes.io/name: sliples
         app.kubernetes.io/component: postgres
     spec:
-      securityContext:
-        runAsNonRoot: true
-        runAsUser: 26  # postgres user in alpine
-        fsGroup: 26
       containers:
         - name: postgres
           image: postgres:16-alpine
@@ -80,11 +76,6 @@ spec:
           volumeMounts:
             - name: postgres-data
               mountPath: /var/lib/postgresql/data
-          securityContext:
-            allowPrivilegeEscalation: false
-            capabilities:
-              drop:
-                - ALL
       volumes:
         - name: postgres-data
           persistentVolumeClaim:
