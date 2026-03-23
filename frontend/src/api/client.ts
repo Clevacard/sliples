@@ -38,6 +38,18 @@ api.interceptors.request.use((config) => {
   return config
 })
 
+// Extract error messages from backend responses
+api.interceptors.response.use(
+  (response) => response,
+  (error) => {
+    // Extract the actual error message from the backend
+    if (error.response?.data?.detail) {
+      error.message = error.response.data.detail
+    }
+    return Promise.reject(error)
+  }
+)
+
 // Health check
 export async function checkHealth() {
   const response = await api.get('/health')
