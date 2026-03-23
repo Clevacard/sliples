@@ -7,10 +7,10 @@ metadata:
     app.kubernetes.io/name: sliples
     app.kubernetes.io/component: frontend
 spec:
-  host: sliples.apps.example.com
+  host: sliples.agantis.in
   to:
     kind: Service
-    name: sliples-frontend-svc
+    name: frontend
     weight: 100
   port:
     targetPort: http

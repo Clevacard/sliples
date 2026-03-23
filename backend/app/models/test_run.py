@@ -38,6 +38,7 @@ class TestRun(Base):
     __tablename__ = "test_runs"
 
     id = Column(UUID(as_uuid=True), primary_key=True, default=uuid.uuid4)
+    project_id = Column(UUID(as_uuid=True), ForeignKey("projects.id", ondelete="CASCADE"), nullable=True)
     scenario_ids = Column(ARRAY(UUID(as_uuid=True)), default=[])
     environment_id = Column(UUID(as_uuid=True), ForeignKey("environments.id"), nullable=False)
     status = Column(SQLEnum(RunStatus), default=RunStatus.QUEUED)
@@ -53,6 +54,7 @@ class TestRun(Base):
     progress_message = Column(String(500), nullable=True)  # Progress status during execution
     created_at = Column(DateTime, default=datetime.utcnow)
 
+    project = relationship("Project", back_populates="test_runs")
     environment = relationship("Environment", back_populates="test_runs")
     results = relationship("TestResult", back_populates="test_run", cascade="all, delete-orphan")
 

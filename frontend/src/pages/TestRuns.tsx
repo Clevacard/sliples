@@ -64,8 +64,17 @@ const formatDuration = (start: string, end?: string) => {
   return `${Math.floor(ms / 60000)}m ${Math.round((ms % 60000) / 1000)}s`
 }
 
+// Parse date as UTC (server returns UTC without Z suffix)
+const parseDate = (date: string) => {
+  // If no timezone indicator, treat as UTC
+  if (!date.endsWith('Z') && !date.includes('+') && !date.includes('-', 10)) {
+    return new Date(date + 'Z')
+  }
+  return new Date(date)
+}
+
 const formatDate = (date: string) => {
-  const d = new Date(date)
+  const d = parseDate(date)
   const now = new Date()
   const diffMs = now.getTime() - d.getTime()
   const diffMins = Math.floor(diffMs / 60000)
@@ -110,7 +119,7 @@ export default function TestRuns() {
   const [loadingScenarios, setLoadingScenarios] = useState(false)
 
   // New run form state
-  const [selectedEnv, setSelectedEnv] = useState('')
+  const [selectedEnvs, setSelectedEnvs] = useState<string[]>([])
   const [selectedTags, setSelectedTags] = useState<string[]>([])
   const [selectedBrowsers, setSelectedBrowsers] = useState<string[]>(['chromium'])
   const [dateFrom, setDateFrom] = useState('')
@@ -157,25 +166,45 @@ export default function TestRuns() {
   }
 
   const handleCreateRun = async () => {
-    if (!selectedEnv) {
+    if (selectedEnvs.length === 0 || selectedBrowsers.length === 0) {
       return
     }
 
     try {
-      const run = await createRun({
-        environment: selectedEnv,
-        scenario_tags: selectedTags.length > 0 ? selectedTags : undefined,
-        browsers: selectedBrowsers.length > 0 ? selectedBrowsers : ['chromium'],
-      })
+      const createdRuns: TestRun[] = []
+
+      // Create a run for each environment/browser combination
+      for (const env of selectedEnvs) {
+        for (const browser of selectedBrowsers) {
+          const run = await createRun({
+            environment: env,
+            scenario_tags: selectedTags.length > 0 ? selectedTags : undefined,
+            browsers: [browser],
+          })
+          createdRuns.push(run)
+        }
+      }
+
       setShowNewRunModal(false)
-      setSelectedEnv('')
+      setSelectedEnvs([])
       setSelectedTags([])
       setSelectedBrowsers(['chromium'])
-      // Navigate to run details to show progress
-      navigate(`/runs/${run.id}`)
+
+      // If only one run, navigate to it; otherwise refresh the list
+      if (createdRuns.length === 1) {
+        navigate(`/runs/${createdRuns[0].id}`)
+      } else {
+        fetchRuns()
+      }
     } catch (error) {
       console.error('Failed to create run:', error)
     }
+  }
+
+  const toggleEnv = (envName: string) => {
+    setSelectedEnvs((prev) =>
+      prev.includes(envName) ? prev.filter((e) => e !== envName) : [...prev, envName]
+    )
   }
 
   const toggleTag = (tag: string) => {
@@ -338,7 +367,7 @@ export default function TestRuns() {
                     )}
                   </td>
                   <td className="px-6">
-                    <span className="text-gray-300" title={new Date(run.created_at).toLocaleString()}>
+                    <span className="text-gray-300" title={parseDate(run.created_at).toLocaleString()}>
                       {formatDate(run.created_at)}
                     </span>
                   </td>
@@ -434,23 +463,37 @@ export default function TestRuns() {
           {/* Environment Selection */}
           <div>
             <label className="block text-sm font-medium text-gray-300 mb-2">
-              Environment <span className="text-red-400">*</span>
+              Environments <span className="text-red-400">*</span>
             </label>
-            <select
-              className="input"
-              value={selectedEnv}
-              onChange={(e) => setSelectedEnv(e.target.value)}
-            >
-              <option value="">Select an environment</option>
-              {environments.map((env) => (
-                <option key={env.id} value={env.name}>
-                  {env.name}
-                </option>
-              ))}
-            </select>
-            {environments.length === 0 && (
-              <p className="text-sm text-yellow-400 mt-2">
+            {environments.length > 0 ? (
+              <div className="flex flex-wrap gap-2">
+                {environments.map((env) => (
+                  <label
+                    key={env.id}
+                    className={`flex items-center gap-2 px-3 py-2 rounded-lg border cursor-pointer transition-colors ${
+                      selectedEnvs.includes(env.name)
+                        ? 'border-blue-500 bg-blue-900/30'
+                        : 'border-gray-600 bg-gray-700/50 hover:border-gray-500'
+                    }`}
+                  >
+                    <input
+                      type="checkbox"
+                      checked={selectedEnvs.includes(env.name)}
+                      onChange={() => toggleEnv(env.name)}
+                      className="rounded border-gray-500 bg-gray-700 text-blue-600 focus:ring-blue-500"
+                    />
+                    <span className="text-gray-200">{env.name}</span>
+                  </label>
+                ))}
+              </div>
+            ) : (
+              <p className="text-sm text-yellow-400">
                 No environments available. Create one in the Environments page.
+              </p>
+            )}
+            {selectedEnvs.length === 0 && environments.length > 0 && (
+              <p className="text-sm text-yellow-400 mt-2">
+                Please select at least one environment
               </p>
             )}
           </div>
@@ -528,6 +571,27 @@ export default function TestRuns() {
               </p>
             )}
           </div>
+
+          {/* Summary */}
+          {selectedEnvs.length > 0 && selectedBrowsers.length > 0 && (
+            <div className="bg-gray-900/50 border border-gray-700 rounded-lg p-4">
+              <p className="text-sm text-gray-300">
+                <span className="text-blue-400 font-semibold">
+                  {selectedEnvs.length * selectedBrowsers.length}
+                </span>{' '}
+                test run{selectedEnvs.length * selectedBrowsers.length > 1 ? 's' : ''} will be created:
+              </p>
+              <ul className="mt-2 text-xs text-gray-400 space-y-1">
+                {selectedEnvs.map((env) =>
+                  selectedBrowsers.map((browser) => (
+                    <li key={`${env}-${browser}`}>
+                      • {env} / {browser}
+                    </li>
+                  ))
+                )}
+              </ul>
+            </div>
+          )}
         </div>
 
         <ModalFooter>
@@ -539,7 +603,7 @@ export default function TestRuns() {
           </button>
           <button
             onClick={handleCreateRun}
-            disabled={creating || !selectedEnv || selectedBrowsers.length === 0}
+            disabled={creating || selectedEnvs.length === 0 || selectedBrowsers.length === 0}
             className="btn btn-primary flex items-center gap-2"
           >
             {creating ? (
@@ -556,7 +620,7 @@ export default function TestRuns() {
                   <path strokeLinecap="round" strokeLinejoin="round" strokeWidth={2} d="M14.752 11.168l-3.197-2.132A1 1 0 0010 9.87v4.263a1 1 0 001.555.832l3.197-2.132a1 1 0 000-1.664z" />
                   <path strokeLinecap="round" strokeLinejoin="round" strokeWidth={2} d="M21 12a9 9 0 11-18 0 9 9 0 0118 0z" />
                 </svg>
-                Start Test Run
+                Start {selectedEnvs.length * selectedBrowsers.length > 1 ? `${selectedEnvs.length * selectedBrowsers.length} Runs` : 'Test Run'}
               </>
             )}
           </button>

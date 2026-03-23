@@ -63,14 +63,14 @@ export default function Modal({
 
       {/* Modal Content */}
       <div
-        className={`relative w-full ${sizeClasses[size]} mx-4 bg-gray-800 rounded-xl shadow-2xl border border-gray-700 animate-in fade-in zoom-in-95 duration-200`}
+        className={`relative w-full ${sizeClasses[size]} mx-4 max-h-[90vh] flex flex-col bg-gray-800 rounded-xl shadow-2xl border border-gray-700 animate-in fade-in zoom-in-95 duration-200`}
         role="dialog"
         aria-modal="true"
         aria-labelledby={title ? 'modal-title' : undefined}
       >
         {/* Header */}
         {(title || showCloseButton) && (
-          <div className="flex items-center justify-between px-6 py-4 border-b border-gray-700">
+          <div className="flex-shrink-0 flex items-center justify-between px-6 py-4 border-b border-gray-700">
             {title && (
               <h2 id="modal-title" className="text-lg font-semibold text-gray-100">
                 {title}
@@ -101,7 +101,7 @@ export default function Modal({
         )}
 
         {/* Body */}
-        <div className="px-6 py-4">{children}</div>
+        <div className="px-6 py-4 overflow-y-auto">{children}</div>
       </div>
     </div>
   )

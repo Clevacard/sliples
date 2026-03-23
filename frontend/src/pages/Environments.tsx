@@ -197,7 +197,7 @@ export default function Environments() {
                         {env.base_url}
                       </p>
                       <p className="text-xs text-gray-500 mt-1">
-                        Retention: {env.retention_days} days
+                        Locale: {env.locale || 'en-GB'} · Timezone: {env.timezone_id || 'Europe/London'} · Retention: {env.retention_days} days
                       </p>
                     </div>
 

@@ -226,12 +226,16 @@ export default function Schedules() {
 
                     {/* Details */}
                     <div className="flex flex-wrap items-center gap-4 mt-3 text-sm text-gray-400">
-                      {/* Environment */}
+                      {/* Environments */}
                       <div className="flex items-center gap-1">
                         <svg className="w-4 h-4" fill="none" stroke="currentColor" viewBox="0 0 24 24">
                           <path strokeLinecap="round" strokeLinejoin="round" strokeWidth={2} d="M5 12h14M5 12a2 2 0 01-2-2V6a2 2 0 012-2h14a2 2 0 012 2v4a2 2 0 01-2 2M5 12a2 2 0 00-2 2v4a2 2 0 002 2h14a2 2 0 002-2v-4a2 2 0 00-2-2" />
                         </svg>
-                        <span>{schedule.environment_name || 'Unknown'}</span>
+                        <span>
+                          {schedule.environment_names?.length > 0
+                            ? schedule.environment_names.join(', ')
+                            : schedule.environment_name || 'Unknown'}
+                        </span>
                       </div>
 
                       {/* Browsers */}

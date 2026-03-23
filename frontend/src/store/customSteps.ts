@@ -28,7 +28,7 @@ export const useCustomStepsStore = create<CustomStepsState>((set) => ({
 
   // Fetch all custom steps
   fetchSteps: async () => {
-    set({ isLoading: true, error: null })
+    set({ isLoading: true, error: null, selectedStep: null })
     try {
       const steps = await api.listCustomSteps()
       set({ steps, isLoading: false })

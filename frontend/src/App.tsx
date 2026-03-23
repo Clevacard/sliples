@@ -15,6 +15,10 @@ import CustomSteps from './pages/CustomSteps'
 import Schedules from './pages/Schedules'
 import Users from './pages/Users'
 import TestMode from './pages/TestMode'
+import Projects from './pages/Projects'
+import CreateProject from './pages/CreateProject'
+import ProjectSettings from './pages/ProjectSettings'
+import Pages from './pages/Pages'
 import AdminRoute from './components/AdminRoute'
 
 function App() {
@@ -35,11 +39,15 @@ function App() {
       >
         <Route index element={<Navigate to="/dashboard" replace />} />
         <Route path="dashboard" element={<Dashboard />} />
+        <Route path="projects" element={<Projects />} />
+        <Route path="projects/new" element={<CreateProject />} />
+        <Route path="projects/:id/settings" element={<ProjectSettings />} />
         <Route path="scenarios" element={<Scenarios />} />
         <Route path="scenarios/:id" element={<ScenarioEditor />} />
         <Route path="runs" element={<TestRuns />} />
         <Route path="runs/:id" element={<RunDetails />} />
         <Route path="environments" element={<Environments />} />
+        <Route path="pages" element={<Pages />} />
         <Route path="repos" element={<Repos />} />
         <Route path="custom-steps" element={<CustomSteps />} />
         <Route path="schedules" element={<Schedules />} />

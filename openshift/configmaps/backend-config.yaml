@@ -8,20 +8,20 @@ metadata:
     app.kubernetes.io/component: backend
 data:
   # Redis
-  REDIS_URL: "redis://sliples-redis-svc:6379/0"
+  REDIS_URL: "redis://redis:6379/0"
   # S3/MinIO
-  S3_ENDPOINT: "http://sliples-minio-svc:9000"
+  S3_ENDPOINT: "http://minio:9000"
   S3_BUCKET: "sliples-screenshots"
   # JWT Settings
   JWT_ALGORITHM: "HS256"
   JWT_EXPIRY_HOURS: "24"
   # CORS
-  ALLOWED_ORIGINS: "https://sliples.apps.example.com"
+  ALLOWED_ORIGINS: "https://sliples.agantis.in"
   # Frontend URL for redirects
-  FRONTEND_URL: "https://sliples.apps.example.com"
+  FRONTEND_URL: "https://sliples.agantis.in"
   # Google Workspace (optional)
-  ALLOWED_WORKSPACE_DOMAINS: "example.com"
-  GOOGLE_REDIRECT_URI: "https://api.sliples.apps.example.com/api/v1/auth/google/callback"
+  ALLOWED_WORKSPACE_DOMAINS: "agantis.in"
+  GOOGLE_REDIRECT_URI: "https://sliples.agantis.in/api/v1/auth/google/callback"
   # Browser containers (internal service URLs)
-  BROWSER_CHROME_URL: "ws://sliples-browser-chrome-svc:3000"
-  BROWSER_FIREFOX_URL: "ws://sliples-browser-firefox-svc:3000"
+  BROWSER_CHROME_URL: "ws://browser-chrome:3000"
+  BROWSER_FIREFOX_URL: "ws://browser-firefox:3000"

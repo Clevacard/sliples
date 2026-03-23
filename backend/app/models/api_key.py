@@ -3,8 +3,9 @@
 import uuid
 from datetime import datetime
 
-from sqlalchemy import Column, String, DateTime, Boolean
+from sqlalchemy import Column, String, DateTime, Boolean, ForeignKey
 from sqlalchemy.dialects.postgresql import UUID, ARRAY
+from sqlalchemy.orm import relationship
 
 from app.database import Base
 
@@ -15,6 +16,7 @@ class ApiKey(Base):
     __tablename__ = "api_keys"
 
     id = Column(UUID(as_uuid=True), primary_key=True, default=uuid.uuid4)
+    project_id = Column(UUID(as_uuid=True), ForeignKey("projects.id", ondelete="CASCADE"), nullable=True)
     name = Column(String(100), nullable=False)
     key_hash = Column(String(255), nullable=False)
     key_prefix = Column(String(10), nullable=False)  # For identification (first 8 chars)
@@ -22,3 +24,5 @@ class ApiKey(Base):
     created_at = Column(DateTime, default=datetime.utcnow)
     last_used_at = Column(DateTime, nullable=True)
     active = Column(Boolean, default=True)
+
+    project = relationship("Project", back_populates="api_keys")

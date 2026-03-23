@@ -3,6 +3,7 @@ import { getTestRuns, getTestRun, createTestRun, retryTestRun, getEnvironments, 
 
 export interface TestRun {
   id: string
+  project_id?: string
   status: 'queued' | 'running' | 'passed' | 'failed' | 'cancelled'
   browser: string
   browser_version?: string
@@ -179,7 +180,7 @@ export const useTestRunsStore = create<TestRunsState>((set, get) => ({
 
   // Actions
   fetchRuns: async () => {
-    set({ loading: true, error: null })
+    set({ loading: true, error: null, currentRun: null })
     try {
       const { filters } = get()
       const params: Record<string, unknown> = {
@@ -246,7 +247,7 @@ export const useTestRunsStore = create<TestRunsState>((set, get) => ({
   fetchEnvironments: async () => {
     try {
       const data = await getEnvironments()
-      set({ environments: Array.isArray(data) ? data : data.items || [] })
+      set({ environments: Array.isArray(data) ? data : [] })
     } catch (error) {
       console.error('Failed to fetch environments:', error)
     }
@@ -255,7 +256,7 @@ export const useTestRunsStore = create<TestRunsState>((set, get) => ({
   fetchBrowsers: async () => {
     try {
       const data = await getBrowsers()
-      set({ browsers: Array.isArray(data) ? data : data.items || [] })
+      set({ browsers: Array.isArray(data) ? data : [] })
     } catch (error) {
       // Fallback to default browsers if endpoint not available
       set({

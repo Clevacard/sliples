@@ -12,8 +12,8 @@ from pydantic import BaseModel, Field
 from sqlalchemy.orm import Session
 
 from app.database import get_db
-from app.models import ApiKey, User, UserRole
-from app.api.deps import get_api_key
+from app.models import ApiKey, User, UserRole, Project
+from app.api.deps import get_api_key, verify_project_access, get_validated_api_key, can_write_to_project
 from app.config import get_settings
 from app.services.google_auth import (
     get_authorization_url,
@@ -39,11 +39,13 @@ class ApiKeyCreate(BaseModel):
     """Request schema for creating a new API key."""
     name: str = Field(..., min_length=1, max_length=100)
     environment_ids: list[UUID] = Field(default_factory=list)
+    project_id: Optional[UUID] = None
 
 
 class ApiKeyResponse(BaseModel):
     """Response schema for API key (masked)."""
     id: UUID
+    project_id: Optional[UUID] = None
     name: str
     key_prefix: str
     environment_ids: list[UUID]
@@ -58,6 +60,7 @@ class ApiKeyResponse(BaseModel):
 class ApiKeyCreatedResponse(BaseModel):
     """Response schema when a new API key is created (includes full key)."""
     id: UUID
+    project_id: Optional[UUID] = None
     name: str
     key: str  # Full key - only returned on creation
     key_prefix: str
@@ -86,6 +89,8 @@ async def create_api_key(
     key_data: ApiKeyCreate,
     db: Session = Depends(get_db),
     _api_key: str = Depends(get_api_key),  # Require authentication
+    project: Optional[Project] = Depends(verify_project_access),
+    validated_key: Optional[ApiKey] = Depends(get_validated_api_key),
 ):
     """
     Create a new API key.
@@ -93,11 +98,21 @@ async def create_api_key(
     The full key is returned ONLY in this response - store it securely.
     Only the hash is stored in the database.
     """
-    # Check for duplicate name
-    existing = db.query(ApiKey).filter(
+    # Check write permissions (need at least member role to create API keys)
+    if not can_write_to_project(db, _api_key, project, validated_key):
+        raise HTTPException(
+            status_code=status.HTTP_403_FORBIDDEN,
+            detail="You don't have permission to create API keys in this project",
+        )
+
+    # Check for duplicate name within project scope
+    query = db.query(ApiKey).filter(
         ApiKey.name == key_data.name,
         ApiKey.active == True,
-    ).first()
+    )
+    if project:
+        query = query.filter(ApiKey.project_id == project.id)
+    existing = query.first()
     if existing:
         raise HTTPException(
             status_code=status.HTTP_400_BAD_REQUEST,
@@ -111,6 +126,7 @@ async def create_api_key(
 
     # Create the API key record
     db_key = ApiKey(
+        project_id=project.id if project else None,
         name=key_data.name,
         key_hash=key_hash,
         key_prefix=key_prefix,
@@ -124,6 +140,7 @@ async def create_api_key(
     # Return response with the full key (only time it's returned)
     return ApiKeyCreatedResponse(
         id=db_key.id,
+        project_id=db_key.project_id,
         name=db_key.name,
         key=raw_key,
         key_prefix=key_prefix,
@@ -137,16 +154,21 @@ async def create_api_key(
 async def list_api_keys(
     db: Session = Depends(get_db),
     _api_key: str = Depends(get_api_key),
+    project: Optional[Project] = Depends(verify_project_access),
 ):
     """
-    List all API keys (masked).
+    List all API keys (masked), optionally filtered by project.
 
     Returns key metadata with masked keys (only prefix shown).
     """
-    keys = db.query(ApiKey).filter(ApiKey.active == True).all()
+    query = db.query(ApiKey).filter(ApiKey.active == True)
+    if project:
+        query = query.filter(ApiKey.project_id == project.id)
+    keys = query.all()
     return [
         ApiKeyResponse(
             id=key.id,
+            project_id=key.project_id,
             name=key.name,
             key_prefix=key.key_prefix,
             environment_ids=key.environment_ids or [],
@@ -178,6 +200,7 @@ async def get_api_key_by_id(
 
     return ApiKeyResponse(
         id=key.id,
+        project_id=key.project_id,
         name=key.name,
         key_prefix=key.key_prefix,
         environment_ids=key.environment_ids or [],

@@ -10,8 +10,13 @@ from pydantic import BaseModel, Field, field_validator
 from croniter import croniter
 
 from app.database import get_db
-from app.models import Schedule, Environment, Scenario
-from app.api.deps import get_api_key_or_user
+from app.models import Schedule, Environment, Scenario, Project, ApiKey
+from app.api.deps import (
+    get_api_key_or_user,
+    verify_project_access,
+    get_validated_api_key,
+    can_write_to_project,
+)
 
 router = APIRouter()
 
@@ -135,7 +140,7 @@ class ScheduleCreate(BaseModel):
     cron_expression: str = Field(..., min_length=9, max_length=100)
     scenario_tags: list[str] = Field(default=[])
     scenario_ids: list[UUID] = Field(default=[])
-    environment_id: UUID
+    environment_ids: list[UUID] = Field(..., min_length=1)
     browsers: list[str] = Field(default=["chromium"])
     enabled: bool = True
 
@@ -159,7 +164,7 @@ class ScheduleUpdate(BaseModel):
     cron_expression: Optional[str] = Field(None, min_length=9, max_length=100)
     scenario_tags: Optional[list[str]] = None
     scenario_ids: Optional[list[UUID]] = None
-    environment_id: Optional[UUID] = None
+    environment_ids: Optional[list[UUID]] = None
     browsers: Optional[list[str]] = None
     enabled: Optional[bool] = None
 
@@ -184,13 +189,14 @@ class ScheduleUpdate(BaseModel):
 
 class ScheduleResponse(BaseModel):
     id: UUID
+    project_id: Optional[UUID] = None
     name: str
     cron_expression: str
     cron_description: str
     scenario_tags: list[str]
     scenario_ids: list[UUID]
-    environment_id: UUID
-    environment_name: Optional[str] = None
+    environment_ids: list[UUID]
+    environment_names: list[str] = []
     browsers: list[str]
     enabled: bool
     created_by: Optional[str]
@@ -204,17 +210,25 @@ class ScheduleResponse(BaseModel):
         from_attributes = True
 
 
-def schedule_to_response(schedule: Schedule) -> ScheduleResponse:
+def schedule_to_response(schedule: Schedule, db: Session = None) -> ScheduleResponse:
     """Convert a Schedule model to a ScheduleResponse."""
+    # Look up environment names if db session provided
+    environment_names = []
+    if db and schedule.environment_ids:
+        envs = db.query(Environment).filter(Environment.id.in_(schedule.environment_ids)).all()
+        env_map = {env.id: env.name for env in envs}
+        environment_names = [env_map.get(env_id, "Unknown") for env_id in schedule.environment_ids]
+
     return ScheduleResponse(
         id=schedule.id,
+        project_id=schedule.project_id,
         name=schedule.name,
         cron_expression=schedule.cron_expression,
         cron_description=get_cron_description(schedule.cron_expression),
         scenario_tags=schedule.scenario_tags or [],
         scenario_ids=schedule.scenario_ids or [],
-        environment_id=schedule.environment_id,
-        environment_name=schedule.environment.name if schedule.environment else None,
+        environment_ids=schedule.environment_ids or [],
+        environment_names=environment_names,
         browsers=schedule.browsers or ["chromium"],
         enabled=schedule.enabled,
         created_by=schedule.created_by,
@@ -231,13 +245,16 @@ async def list_schedules(
     enabled_only: bool = False,
     db: Session = Depends(get_db),
     auth = Depends(get_api_key_or_user),
+    project: Optional[Project] = Depends(verify_project_access),
 ):
-    """List all schedules."""
+    """List all schedules, optionally filtered by project."""
     query = db.query(Schedule)
+    if project:
+        query = query.filter(Schedule.project_id == project.id)
     if enabled_only:
         query = query.filter(Schedule.enabled == True)
     schedules = query.order_by(Schedule.created_at.desc()).all()
-    return [schedule_to_response(s) for s in schedules]
+    return [schedule_to_response(s, db) for s in schedules]
 
 
 @router.post("/schedules", response_model=ScheduleResponse, status_code=status.HTTP_201_CREATED)
@@ -245,12 +262,28 @@ async def create_schedule(
     schedule: ScheduleCreate,
     db: Session = Depends(get_db),
     auth = Depends(get_api_key_or_user),
+    project: Optional[Project] = Depends(verify_project_access),
+    api_key: Optional[ApiKey] = Depends(get_validated_api_key),
 ):
     """Create a new schedule."""
-    # Verify environment exists
-    env = db.query(Environment).filter(Environment.id == schedule.environment_id).first()
-    if not env:
-        raise HTTPException(status_code=404, detail="Environment not found")
+    # Check write permissions
+    if not can_write_to_project(db, auth, project, api_key):
+        raise HTTPException(
+            status_code=status.HTTP_403_FORBIDDEN,
+            detail="You don't have permission to create schedules in this project",
+        )
+
+    # Verify all environments exist
+    if schedule.environment_ids:
+        existing_envs = {
+            e.id for e in db.query(Environment.id).filter(Environment.id.in_(schedule.environment_ids)).all()
+        }
+        missing = set(schedule.environment_ids) - existing_envs
+        if missing:
+            raise HTTPException(
+                status_code=404,
+                detail=f"Environments not found: {', '.join(str(m) for m in missing)}"
+            )
 
     # Verify scenario_ids exist if provided
     if schedule.scenario_ids:
@@ -268,11 +301,12 @@ async def create_schedule(
     next_run = calculate_next_run(schedule.cron_expression) if schedule.enabled else None
 
     db_schedule = Schedule(
+        project_id=project.id if project else None,
         name=schedule.name,
         cron_expression=schedule.cron_expression,
         scenario_tags=schedule.scenario_tags,
         scenario_ids=schedule.scenario_ids,
-        environment_id=schedule.environment_id,
+        environment_ids=schedule.environment_ids,
         browsers=schedule.browsers,
         enabled=schedule.enabled,
         next_run_at=next_run,
@@ -281,7 +315,7 @@ async def create_schedule(
     db.add(db_schedule)
     db.commit()
     db.refresh(db_schedule)
-    return schedule_to_response(db_schedule)
+    return schedule_to_response(db_schedule, db)
 
 
 @router.get("/schedules/{schedule_id}", response_model=ScheduleResponse)
@@ -294,7 +328,7 @@ async def get_schedule(
     schedule = db.query(Schedule).filter(Schedule.id == schedule_id).first()
     if not schedule:
         raise HTTPException(status_code=404, detail="Schedule not found")
-    return schedule_to_response(schedule)
+    return schedule_to_response(schedule, db)
 
 
 @router.put("/schedules/{schedule_id}", response_model=ScheduleResponse)
@@ -311,11 +345,17 @@ async def update_schedule(
 
     update_data = schedule_update.model_dump(exclude_unset=True)
 
-    # Verify environment if being updated
-    if "environment_id" in update_data:
-        env = db.query(Environment).filter(Environment.id == update_data["environment_id"]).first()
-        if not env:
-            raise HTTPException(status_code=404, detail="Environment not found")
+    # Verify environments if being updated
+    if "environment_ids" in update_data and update_data["environment_ids"]:
+        existing_envs = {
+            e.id for e in db.query(Environment.id).filter(Environment.id.in_(update_data["environment_ids"])).all()
+        }
+        missing = set(update_data["environment_ids"]) - existing_envs
+        if missing:
+            raise HTTPException(
+                status_code=404,
+                detail=f"Environments not found: {', '.join(str(m) for m in missing)}"
+            )
 
     # Verify scenario_ids if being updated
     if "scenario_ids" in update_data and update_data["scenario_ids"]:
@@ -345,7 +385,7 @@ async def update_schedule(
     schedule.updated_at = datetime.utcnow()
     db.commit()
     db.refresh(schedule)
-    return schedule_to_response(schedule)
+    return schedule_to_response(schedule, db)
 
 
 @router.delete("/schedules/{schedule_id}", status_code=status.HTTP_204_NO_CONTENT)
@@ -353,11 +393,20 @@ async def delete_schedule(
     schedule_id: UUID,
     db: Session = Depends(get_db),
     auth = Depends(get_api_key_or_user),
+    api_key: Optional[ApiKey] = Depends(get_validated_api_key),
 ):
     """Delete a schedule."""
     schedule = db.query(Schedule).filter(Schedule.id == schedule_id).first()
     if not schedule:
         raise HTTPException(status_code=404, detail="Schedule not found")
+
+    # Check write permissions for the schedule's project
+    schedule_project = db.query(Project).filter(Project.id == schedule.project_id).first() if schedule.project_id else None
+    if not can_write_to_project(db, auth, schedule_project, api_key):
+        raise HTTPException(
+            status_code=status.HTTP_403_FORBIDDEN,
+            detail="You don't have permission to delete this schedule",
+        )
 
     db.delete(schedule)
     db.commit()
@@ -384,7 +433,7 @@ async def toggle_schedule(
     schedule.updated_at = datetime.utcnow()
     db.commit()
     db.refresh(schedule)
-    return schedule_to_response(schedule)
+    return schedule_to_response(schedule, db)
 
 
 @router.post("/schedules/{schedule_id}/run-now", status_code=status.HTTP_202_ACCEPTED)

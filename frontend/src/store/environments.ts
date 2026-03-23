@@ -19,7 +19,7 @@ interface EnvironmentsState {
   clearError: () => void
 }
 
-export const useEnvironmentsStore = create<EnvironmentsState>((set, get) => ({
+export const useEnvironmentsStore = create<EnvironmentsState>((set) => ({
   // Initial state
   environments: [],
   selectedEnvironment: null,
@@ -28,7 +28,7 @@ export const useEnvironmentsStore = create<EnvironmentsState>((set, get) => ({
 
   // Fetch all environments
   fetchEnvironments: async () => {
-    set({ isLoading: true, error: null })
+    set({ isLoading: true, error: null, selectedEnvironment: null })
     try {
       const environments = await api.getEnvironments()
       set({ environments, isLoading: false })

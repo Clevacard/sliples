@@ -8,12 +8,12 @@ metadata:
     app.kubernetes.io/component: worker
 data:
   # Redis
-  REDIS_URL: "redis://sliples-redis-svc:6379/0"
+  REDIS_URL: "redis://redis:6379/0"
   # S3/MinIO
-  S3_ENDPOINT: "http://sliples-minio-svc:9000"
+  S3_ENDPOINT: "http://minio:9000"
   S3_BUCKET: "sliples-screenshots"
   # Browser containers
-  BROWSER_CHROME_URL: "ws://sliples-browser-chrome-svc:3000"
-  BROWSER_FIREFOX_URL: "ws://sliples-browser-firefox-svc:3000"
+  BROWSER_CHROME_URL: "ws://browser-chrome:3000"
+  BROWSER_FIREFOX_URL: "ws://browser-firefox:3000"
   # Worker settings
   CELERY_CONCURRENCY: "4"

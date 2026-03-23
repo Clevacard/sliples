@@ -9,8 +9,14 @@ from sqlalchemy.orm import Session
 from pydantic import BaseModel, field_validator, Field
 
 from app.database import get_db
-from app.models import Environment, BrowserConfig
-from app.api.deps import get_api_key_or_user
+from app.models import Environment, BrowserConfig, Project, User, ApiKey
+from app.api.deps import (
+    get_api_key_or_user,
+    get_current_project,
+    verify_project_access,
+    get_validated_api_key,
+    can_write_to_project,
+)
 
 router = APIRouter()
 
@@ -68,6 +74,8 @@ class BrowserConfigResponse(BaseModel):
 class EnvironmentCreate(BaseModel):
     name: str = Field(..., min_length=1, max_length=100)
     base_url: str
+    locale: str = Field(default="en-GB", max_length=20)
+    timezone_id: str = Field(default="Europe/London", max_length=50)
     credentials_env: Optional[str] = None
     variables: dict = {}
     retention_days: int = Field(default=365, ge=1, le=3650)
@@ -82,6 +90,8 @@ class EnvironmentCreate(BaseModel):
 class EnvironmentUpdate(BaseModel):
     name: Optional[str] = Field(None, min_length=1, max_length=100)
     base_url: Optional[str] = None
+    locale: Optional[str] = Field(None, max_length=20)
+    timezone_id: Optional[str] = Field(None, max_length=50)
     credentials_env: Optional[str] = None
     variables: Optional[dict] = None
     retention_days: Optional[int] = Field(None, ge=1, le=3650)
@@ -97,8 +107,11 @@ class EnvironmentUpdate(BaseModel):
 
 class EnvironmentResponse(BaseModel):
     id: UUID
+    project_id: Optional[UUID] = None
     name: str
     base_url: str
+    locale: Optional[str] = "en-GB"
+    timezone_id: Optional[str] = "Europe/London"
     credentials_env: Optional[str]
     variables: dict
     retention_days: int
@@ -112,10 +125,13 @@ class EnvironmentResponse(BaseModel):
 async def list_environments(
     db: Session = Depends(get_db),
     auth = Depends(get_api_key_or_user),
+    project: Optional[Project] = Depends(verify_project_access),
 ):
-    """List all environments."""
-    environments = db.query(Environment).all()
-    return environments
+    """List all environments, optionally filtered by project."""
+    query = db.query(Environment)
+    if project:
+        query = query.filter(Environment.project_id == project.id)
+    return query.all()
 
 
 @router.post("/environments", response_model=EnvironmentResponse, status_code=status.HTTP_201_CREATED)
@@ -123,15 +139,31 @@ async def create_environment(
     env: EnvironmentCreate,
     db: Session = Depends(get_db),
     auth = Depends(get_api_key_or_user),
+    project: Optional[Project] = Depends(verify_project_access),
+    api_key: Optional[ApiKey] = Depends(get_validated_api_key),
 ):
     """Create a new environment."""
-    existing = db.query(Environment).filter(Environment.name == env.name).first()
+    # Check write permissions
+    if not can_write_to_project(db, auth, project, api_key):
+        raise HTTPException(
+            status_code=status.HTTP_403_FORBIDDEN,
+            detail="You don't have permission to create environments in this project",
+        )
+
+    # Check uniqueness within project scope
+    query = db.query(Environment).filter(Environment.name == env.name)
+    if project:
+        query = query.filter(Environment.project_id == project.id)
+    existing = query.first()
     if existing:
         raise HTTPException(status_code=400, detail="Environment with this name already exists")
 
     db_env = Environment(
+        project_id=project.id if project else None,
         name=env.name,
         base_url=env.base_url,
+        locale=env.locale,
+        timezone_id=env.timezone_id,
         credentials_env=env.credentials_env,
         variables=env.variables,
         retention_days=env.retention_days,
@@ -173,11 +205,20 @@ async def update_environment(
     env_update: EnvironmentUpdate,
     db: Session = Depends(get_db),
     auth = Depends(get_api_key_or_user),
+    api_key: Optional[ApiKey] = Depends(get_validated_api_key),
 ):
     """Update an environment."""
     env = db.query(Environment).filter(Environment.id == environment_id).first()
     if not env:
         raise HTTPException(status_code=404, detail="Environment not found")
+
+    # Check write permissions for the environment's project
+    env_project = db.query(Project).filter(Project.id == env.project_id).first() if env.project_id else None
+    if not can_write_to_project(db, auth, env_project, api_key):
+        raise HTTPException(
+            status_code=status.HTTP_403_FORBIDDEN,
+            detail="You don't have permission to update this environment",
+        )
 
     update_data = env_update.model_dump(exclude_unset=True)
 
@@ -214,11 +255,20 @@ async def delete_environment(
     environment_id: UUID,
     db: Session = Depends(get_db),
     auth = Depends(get_api_key_or_user),
+    api_key: Optional[ApiKey] = Depends(get_validated_api_key),
 ):
     """Delete an environment."""
     env = db.query(Environment).filter(Environment.id == environment_id).first()
     if not env:
         raise HTTPException(status_code=404, detail="Environment not found")
+
+    # Check write permissions for the environment's project
+    env_project = db.query(Project).filter(Project.id == env.project_id).first() if env.project_id else None
+    if not can_write_to_project(db, auth, env_project, api_key):
+        raise HTTPException(
+            status_code=status.HTTP_403_FORBIDDEN,
+            detail="You don't have permission to delete this environment",
+        )
 
     db.delete(env)
     db.commit()

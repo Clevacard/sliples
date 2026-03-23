@@ -1,7 +1,7 @@
 apiVersion: v1
 kind: Service
 metadata:
-  name: sliples-postgres-svc
+  name: postgres
   namespace: sliples
   labels:
     app.kubernetes.io/name: sliples

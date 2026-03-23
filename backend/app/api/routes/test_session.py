@@ -9,9 +9,38 @@ from sqlalchemy.orm import Session
 from pydantic import BaseModel
 
 from app.database import get_db
-from app.models import Environment, Scenario, TestSession, User, CustomStep
+from app.models import Environment, Scenario, TestSession, User, CustomStep, Page, PageEnvironmentOverride
 from app.api.deps import get_api_key_or_user
 from app.services.interactive_executor import InteractiveExecutor, StepExecutionResult
+
+
+def load_pages_for_environment(db: Session, project_id: Optional[UUID], environment_id: UUID) -> dict[str, str]:
+    """Load page name -> path mapping for an environment.
+
+    Handles environment-specific path overrides.
+    """
+    if not project_id:
+        return {}
+
+    pages = db.query(Page).filter(Page.project_id == project_id).all()
+    if not pages:
+        return {}
+
+    # Build override lookup for this environment
+    override_map = {}
+    overrides = db.query(PageEnvironmentOverride).filter(
+        PageEnvironmentOverride.environment_id == environment_id
+    ).all()
+    for override in overrides:
+        override_map[override.page_id] = override.path
+
+    # Build page_name -> path mapping
+    result = {}
+    for page in pages:
+        path = override_map.get(page.id, page.path)
+        result[page.name] = path
+
+    return result
 
 router = APIRouter()
 
@@ -137,6 +166,9 @@ async def start_test_session(
     # Generate session ID
     session_id = uuid4()
 
+    # Load pages for named page navigation
+    pages = load_pages_for_environment(db, environment.project_id, environment.id)
+
     try:
         # Create interactive session
         await InteractiveExecutor.create_session(
@@ -144,6 +176,9 @@ async def start_test_session(
             browser_type=request.browser_type,
             base_url=environment.base_url,
             headless=False,  # Always visible for interactive testing
+            pages=pages,
+            locale=environment.locale or "en-GB",
+            timezone_id=environment.timezone_id or "Europe/London",
         )
     except Exception as e:
         raise HTTPException(

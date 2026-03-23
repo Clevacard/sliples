@@ -1,5 +1,5 @@
 import { useState, useEffect, useCallback, useRef } from 'react'
-import { useNavigate, useSearchParams } from 'react-router-dom'
+import { useSearchParams } from 'react-router-dom'
 import StepExecutor from '../components/StepExecutor'
 import Modal from '../components/Modal'
 import {
@@ -18,7 +18,6 @@ import {
   runCustomAction,
   TestSession,
   StepExecuteResponse,
-  SessionStatusResponse,
   Environment,
 } from '../api/client'
 
@@ -47,7 +46,6 @@ interface StepResult {
 }
 
 export default function TestMode() {
-  const navigate = useNavigate()
   const [searchParams] = useSearchParams()
 
   // Data state
@@ -75,6 +73,7 @@ export default function TestMode() {
   const [showScreenshotModal, setShowScreenshotModal] = useState(false)
   const [showCustomActionModal, setShowCustomActionModal] = useState(false)
   const [showNavigateModal, setShowNavigateModal] = useState(false)
+  const [showSessionTerminatedModal, setShowSessionTerminatedModal] = useState(false)
   const [customAction, setCustomAction] = useState({ action: 'click', selector: '', value: '' })
   const [navigateUrl, setNavigateUrl] = useState('')
 
@@ -82,7 +81,7 @@ export default function TestMode() {
   const [screenshotGallery, setScreenshotGallery] = useState<string[]>([])
 
   // Polling interval ref
-  const pollIntervalRef = useRef<NodeJS.Timeout | null>(null)
+  const pollIntervalRef = useRef<ReturnType<typeof setInterval> | null>(null)
 
   // Load environments and scenarios on mount
   useEffect(() => {
@@ -124,8 +123,18 @@ export default function TestMode() {
           setStepResults(status.step_results)
           setCurrentStepIndex(status.current_step_index)
           setLogs(status.logs)
-        } catch {
-          // Ignore polling errors
+        } catch (err: unknown) {
+          // Detect session termination (404 = session not found)
+          const isNotFound =
+            (err as { response?: { status?: number } })?.response?.status === 404 ||
+            (err instanceof Error && err.message.includes('404'))
+          if (isNotFound) {
+            if (pollIntervalRef.current) {
+              clearInterval(pollIntervalRef.current)
+              pollIntervalRef.current = null
+            }
+            setShowSessionTerminatedModal(true)
+          }
         }
       }, 3000)
     }
@@ -196,6 +205,110 @@ export default function TestMode() {
       setLogs([])
     } catch (err) {
       setError('Failed to end session')
+    }
+  }
+
+  // Restart the current session (end and start fresh with same settings)
+  const handleRestartSession = async () => {
+    if (!session) return
+
+    setStarting(true)
+    setError(null)
+
+    try {
+      // End current session silently
+      try {
+        await endTestSession(session.id)
+      } catch {
+        // Ignore errors when ending (session might already be gone)
+      }
+
+      // Reset state
+      setSession(null)
+      setSteps([])
+      setStepResults([])
+      setCurrentStepIndex(0)
+      setScreenshot(null)
+      setScreenshotGallery([])
+      setLogs([])
+
+      // Start new session with same settings
+      const newSession = await startTestSession({
+        environment_id: selectedEnvironment,
+        scenario_id: selectedScenario || undefined,
+        browser_type: selectedBrowser,
+      })
+
+      setSession(newSession)
+
+      // If scenario was selected, load it
+      if (selectedScenario) {
+        const scenarioData = await loadScenarioIntoSession(newSession.id, {
+          scenario_id: selectedScenario,
+        })
+        setSteps(scenarioData.steps as Step[])
+      }
+
+      // Take initial screenshot
+      const initialScreenshot = await takeScreenshot(newSession.id)
+      setScreenshot(initialScreenshot.screenshot_base64)
+    } catch (err) {
+      const message = err instanceof Error ? err.message : 'Failed to restart session'
+      setError(message)
+    } finally {
+      setStarting(false)
+    }
+  }
+
+  // Switch to a different environment (restart session with new environment)
+  const handleSwitchEnvironment = async (newEnvironmentId: string) => {
+    if (!session) return
+
+    setStarting(true)
+    setError(null)
+
+    try {
+      // End current session silently
+      try {
+        await endTestSession(session.id)
+      } catch {
+        // Ignore errors when ending
+      }
+
+      // Reset state
+      setSession(null)
+      setSteps([])
+      setStepResults([])
+      setCurrentStepIndex(0)
+      setScreenshot(null)
+      setScreenshotGallery([])
+      setLogs([])
+
+      // Start new session with new environment
+      const newSession = await startTestSession({
+        environment_id: newEnvironmentId,
+        scenario_id: selectedScenario || undefined,
+        browser_type: selectedBrowser,
+      })
+
+      setSession(newSession)
+
+      // If scenario was selected, load it
+      if (selectedScenario) {
+        const scenarioData = await loadScenarioIntoSession(newSession.id, {
+          scenario_id: selectedScenario,
+        })
+        setSteps(scenarioData.steps as Step[])
+      }
+
+      // Take initial screenshot
+      const initialScreenshot = await takeScreenshot(newSession.id)
+      setScreenshot(initialScreenshot.screenshot_base64)
+    } catch (err) {
+      const message = err instanceof Error ? err.message : 'Failed to switch environment'
+      setError(message)
+    } finally {
+      setStarting(false)
     }
   }
 
@@ -572,15 +685,57 @@ export default function TestMode() {
               {/* Session controls */}
               <div className="flex gap-2 mt-4">
                 <button
+                  onClick={handleRestartSession}
+                  disabled={starting}
+                  className="btn btn-secondary btn-sm flex-1"
+                  title="Restart session with same settings"
+                >
+                  {starting ? (
+                    <svg className="w-4 h-4 animate-spin" fill="none" viewBox="0 0 24 24">
+                      <circle className="opacity-25" cx="12" cy="12" r="10" stroke="currentColor" strokeWidth="4" />
+                      <path className="opacity-75" fill="currentColor" d="M4 12a8 8 0 018-8V0C5.373 0 0 5.373 0 12h4z" />
+                    </svg>
+                  ) : (
+                    <svg className="w-4 h-4" fill="none" stroke="currentColor" viewBox="0 0 24 24">
+                      <path strokeLinecap="round" strokeLinejoin="round" strokeWidth={2} d="M4 4v5h.582m15.356 2A8.001 8.001 0 004.582 9m0 0H9m11 11v-5h-.581m0 0a8.003 8.003 0 01-15.357-2m15.357 2H15" />
+                    </svg>
+                  )}
+                </button>
+                <button
                   onClick={handlePauseResume}
                   className="btn btn-secondary btn-sm flex-1"
                 >
                   {session.status === 'active' ? 'Pause' : 'Resume'}
                 </button>
                 <button onClick={handleEndSession} className="btn btn-sm bg-red-900 hover:bg-red-800 text-white flex-1">
-                  End Session
+                  End
                 </button>
               </div>
+            </div>
+
+            {/* Environment switcher */}
+            <div className="p-4 border-b border-gray-700">
+              <label className="block text-sm font-medium text-gray-300 mb-2">
+                Switch Environment
+              </label>
+              <select
+                value={selectedEnvironment}
+                onChange={(e) => {
+                  if (e.target.value && e.target.value !== selectedEnvironment) {
+                    setSelectedEnvironment(e.target.value)
+                    // Auto-restart with new environment
+                    handleSwitchEnvironment(e.target.value)
+                  }
+                }}
+                disabled={starting}
+                className="input w-full text-sm"
+              >
+                {environments.map((env) => (
+                  <option key={env.id} value={env.id}>
+                    {env.name} ({env.base_url})
+                  </option>
+                ))}
+              </select>
             </div>
 
             {/* Scenario selector */}
@@ -905,6 +1060,78 @@ export default function TestMode() {
               </span>
             </div>
           ))}
+        </div>
+      </Modal>
+
+      {/* Session Terminated Modal */}
+      <Modal
+        isOpen={showSessionTerminatedModal}
+        onClose={() => {
+          setShowSessionTerminatedModal(false)
+          setSession(null)
+          setSteps([])
+          setStepResults([])
+          setCurrentStepIndex(0)
+          setScreenshot(null)
+          setLogs([])
+        }}
+        title="Session Terminated"
+      >
+        <div className="text-center py-4">
+          <div className="w-16 h-16 bg-red-900/30 rounded-full flex items-center justify-center mx-auto mb-4">
+            <svg
+              className="w-8 h-8 text-red-400"
+              fill="none"
+              stroke="currentColor"
+              viewBox="0 0 24 24"
+            >
+              <path
+                strokeLinecap="round"
+                strokeLinejoin="round"
+                strokeWidth={2}
+                d="M12 9v2m0 4h.01m-6.938 4h13.856c1.54 0 2.502-1.667 1.732-3L13.732 4c-.77-1.333-2.694-1.333-3.464 0L3.34 16c-.77 1.333.192 3 1.732 3z"
+              />
+            </svg>
+          </div>
+          <h3 className="text-lg font-semibold text-gray-100 mb-2">
+            Test Session Ended
+          </h3>
+          <p className="text-gray-400 mb-6">
+            The test session has been terminated. This may happen if the backend
+            was restarted or the session timed out.
+          </p>
+          <div className="flex gap-3 justify-center">
+            <button
+              onClick={() => {
+                setShowSessionTerminatedModal(false)
+                setSession(null)
+                setSteps([])
+                setStepResults([])
+                setCurrentStepIndex(0)
+                setScreenshot(null)
+                setLogs([])
+              }}
+              className="btn btn-secondary"
+            >
+              Close
+            </button>
+            <button
+              onClick={() => {
+                setShowSessionTerminatedModal(false)
+                setSession(null)
+                setSteps([])
+                setStepResults([])
+                setCurrentStepIndex(0)
+                setScreenshot(null)
+                setLogs([])
+                // Trigger new session start
+                handleStartSession()
+              }}
+              className="btn btn-primary"
+            >
+              Start New Session
+            </button>
+          </div>
         </div>
       </Modal>
     </div>

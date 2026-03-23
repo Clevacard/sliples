@@ -16,13 +16,17 @@ class Environment(Base):
     __tablename__ = "environments"
 
     id = Column(UUID(as_uuid=True), primary_key=True, default=uuid.uuid4)
-    name = Column(String(100), nullable=False, unique=True)
+    project_id = Column(UUID(as_uuid=True), ForeignKey("projects.id", ondelete="CASCADE"), nullable=True)
+    name = Column(String(100), nullable=False)
     base_url = Column(String(500), nullable=False)
+    locale = Column(String(20), default="en-GB")  # Browser locale (e.g., en-GB, de-DE, ar-SA)
+    timezone_id = Column(String(50), default="Europe/London")  # IANA timezone
     credentials_env = Column(String(100), nullable=True)
     variables = Column(JSON, default={})
     retention_days = Column(Integer, default=365)
     created_at = Column(DateTime, default=datetime.utcnow)
 
+    project = relationship("Project", back_populates="environments")
     browser_configs = relationship(
         "BrowserConfig", back_populates="environment", cascade="all, delete-orphan"
     )

@@ -1,6 +1,8 @@
 import { Outlet, NavLink } from 'react-router-dom'
 import UserMenu from './UserMenu'
+import ProjectSelector from './ProjectSelector'
 import { useAuthStore } from '../store/auth'
+import { useProjectChange } from '../hooks/useProjectChange'
 
 interface NavItem {
   name: string
@@ -11,12 +13,14 @@ interface NavItem {
 
 const navigation: NavItem[] = [
   { name: 'Dashboard', path: '/dashboard' },
+  { name: 'Projects', path: '/projects' },
+  { name: 'Environments', path: '/environments' },
+  { name: 'Pages', path: '/pages' },
   { name: 'Scenarios', path: '/scenarios' },
   { name: 'Custom Steps', path: '/custom-steps' },
   { name: 'Test Runs', path: '/runs' },
   { name: 'Test Mode', path: '/test-mode', highlight: true },
   { name: 'Schedules', path: '/schedules' },
-  { name: 'Environments', path: '/environments' },
   { name: 'Repos', path: '/repos' },
   { name: 'Settings', path: '/settings' },
   { name: 'Users', path: '/users', adminOnly: true },
@@ -25,6 +29,9 @@ const navigation: NavItem[] = [
 export default function Layout() {
   const { user } = useAuthStore()
   const isAdmin = user?.role === 'admin'
+
+  // Subscribe to project changes and refresh data
+  useProjectChange()
 
   // Filter navigation items based on user role
   const visibleNavigation = navigation.filter(
@@ -77,8 +84,9 @@ export default function Layout() {
 
       {/* Main content */}
       <div className="flex-1 flex flex-col overflow-hidden">
-        {/* Header with user menu */}
-        <header className="h-14 bg-gray-800 border-b border-gray-700 flex items-center justify-end px-6">
+        {/* Header with project selector and user menu */}
+        <header className="h-14 bg-gray-800 border-b border-gray-700 flex items-center justify-between px-6">
+          <ProjectSelector />
           <UserMenu />
         </header>
 

@@ -10,8 +10,13 @@ from sqlalchemy import or_
 from pydantic import BaseModel
 
 from app.database import get_db
-from app.models import Scenario, ScenarioRepo
-from app.api.deps import get_api_key_or_user
+from app.models import Scenario, ScenarioRepo, Project, ApiKey
+from app.api.deps import (
+    get_api_key_or_user,
+    verify_project_access,
+    get_validated_api_key,
+    can_write_to_project,
+)
 from app.services.filesystem_sync import sync_filesystem_to_db
 
 router = APIRouter()
@@ -19,11 +24,12 @@ router = APIRouter()
 
 class ScenarioResponse(BaseModel):
     id: UUID
-    repo_id: Optional[UUID]
+    project_id: Optional[UUID] = None
+    repo_id: Optional[UUID] = None
     name: str
     feature_path: str
     tags: list[str]
-    updated_at: Optional[datetime]
+    updated_at: Optional[datetime] = None
 
     class Config:
         from_attributes = True
@@ -59,9 +65,13 @@ class ScenarioCreate(BaseModel):
 async def list_all_tags(
     db: Session = Depends(get_db),
     auth = Depends(get_api_key_or_user),
+    project: Optional[Project] = Depends(verify_project_access),
 ):
     """Get a list of all unique tags across all scenarios."""
-    scenarios = db.query(Scenario.tags).all()
+    query = db.query(Scenario.tags)
+    if project:
+        query = query.filter(Scenario.project_id == project.id)
+    scenarios = query.all()
 
     all_tags = set()
     for (tags,) in scenarios:
@@ -82,15 +92,20 @@ async def list_scenarios(
     offset: int = Query(0, ge=0),
     db: Session = Depends(get_db),
     auth = Depends(get_api_key_or_user),
+    project: Optional[Project] = Depends(verify_project_access),
 ):
     """
-    List all scenarios, optionally filtered by tag(s), repo, or search term.
+    List all scenarios, optionally filtered by tag(s), repo, project, or search term.
 
     - Use `tag` for a single tag filter (scenarios containing this tag)
     - Use `tags` for multiple tags (comma-separated, OR logic)
     - Use `search` to filter by scenario name
+    - Use `project_id` header or param to filter by project
     """
     query = db.query(Scenario)
+
+    if project:
+        query = query.filter(Scenario.project_id == project.id)
 
     if repo_id:
         query = query.filter(Scenario.repo_id == repo_id)
@@ -166,8 +181,17 @@ async def create_scenario(
     scenario_data: ScenarioCreate,
     db: Session = Depends(get_db),
     auth = Depends(get_api_key_or_user),
+    project: Optional[Project] = Depends(verify_project_access),
+    api_key: Optional[ApiKey] = Depends(get_validated_api_key),
 ):
     """Create a new scenario."""
+    # Check write permissions
+    if not can_write_to_project(db, auth, project, api_key):
+        raise HTTPException(
+            status_code=403,
+            detail="You don't have permission to create scenarios in this project",
+        )
+
     # Check if repo exists (if repo_id is provided)
     if scenario_data.repo_id:
         repo = db.query(ScenarioRepo).filter(ScenarioRepo.id == scenario_data.repo_id).first()
@@ -175,6 +199,7 @@ async def create_scenario(
             raise HTTPException(status_code=404, detail="Repository not found")
 
     scenario = Scenario(
+        project_id=project.id if project else None,
         name=scenario_data.name,
         feature_path=scenario_data.feature_path,
         content=scenario_data.content,
@@ -192,11 +217,20 @@ async def delete_scenario(
     scenario_id: UUID,
     db: Session = Depends(get_db),
     auth = Depends(get_api_key_or_user),
+    api_key: Optional[ApiKey] = Depends(get_validated_api_key),
 ):
     """Delete a scenario."""
     scenario = db.query(Scenario).filter(Scenario.id == scenario_id).first()
     if not scenario:
         raise HTTPException(status_code=404, detail="Scenario not found")
+
+    # Check write permissions for the scenario's project
+    scenario_project = db.query(Project).filter(Project.id == scenario.project_id).first() if scenario.project_id else None
+    if not can_write_to_project(db, auth, scenario_project, api_key):
+        raise HTTPException(
+            status_code=403,
+            detail="You don't have permission to delete this scenario",
+        )
 
     db.delete(scenario)
     db.commit()

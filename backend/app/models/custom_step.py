@@ -16,6 +16,7 @@ class CustomStep(Base):
     __tablename__ = "custom_steps"
 
     id = Column(UUID(as_uuid=True), primary_key=True, default=uuid.uuid4)
+    project_id = Column(UUID(as_uuid=True), ForeignKey("projects.id", ondelete="CASCADE"), nullable=True)
     repo_id = Column(UUID(as_uuid=True), ForeignKey("scenario_repos.id"), nullable=True)
     name = Column(String(255), nullable=False)
     pattern = Column(String(500), nullable=False)  # Gherkin pattern
@@ -24,4 +25,5 @@ class CustomStep(Base):
     created_at = Column(DateTime, default=datetime.utcnow)
     updated_at = Column(DateTime, default=datetime.utcnow, onupdate=datetime.utcnow)
 
+    project = relationship("Project", back_populates="custom_steps")
     repo = relationship("ScenarioRepo", back_populates="custom_steps")

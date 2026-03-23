@@ -47,14 +47,45 @@ class TestExecutionResult:
 class GherkinStepRegistry:
     """Registry of Gherkin step definitions with their implementations."""
 
-    def __init__(self):
-        """Initialize the step registry with built-in steps."""
+    # CSS class patterns that indicate a disabled element
+    DISABLED_CSS_PATTERNS = ["disabled", "is-disabled", "btn-disabled", "disabled-true"]
+
+    def __init__(self, pages: Optional[dict[str, str]] = None):
+        """Initialize the step registry with built-in steps.
+
+        Args:
+            pages: Optional dict of page_name -> path for named page navigation
+        """
         self._steps: dict[str, tuple[re.Pattern, Callable]] = {}
+        self._pages = pages or {}  # page_name -> path mapping
         self._register_builtin_steps()
+
+    def set_pages(self, pages: dict[str, str]):
+        """Set the pages mapping for navigation."""
+        self._pages = pages
+
+    def resolve_page(self, name: str) -> Optional[str]:
+        """Resolve a page name to its path.
+
+        Args:
+            name: Page name (case-insensitive)
+
+        Returns:
+            Path if found, None otherwise
+        """
+        # Try exact match first
+        if name in self._pages:
+            return self._pages[name]
+        # Try case-insensitive match
+        name_lower = name.lower()
+        for page_name, path in self._pages.items():
+            if page_name.lower() == name_lower:
+                return path
+        return None
 
     def _register_builtin_steps(self):
         """Register built-in Gherkin step definitions."""
-        # Navigation steps
+        # Navigation steps - with quotes
         self.register(
             r'I navigate to "([^"]*)"',
             self._step_navigate,
@@ -69,6 +100,32 @@ class GherkinStepRegistry:
         )
         self.register(
             r'I visit "([^"]*)"',
+            self._step_navigate,
+        )
+        # Navigation steps - without quotes (for named pages)
+        self.register(
+            r'I navigate to (\w+)',
+            self._step_navigate,
+        )
+        self.register(
+            r'I go to (\w+)',
+            self._step_navigate,
+        )
+        self.register(
+            r'I am on (\w+)',
+            self._step_navigate,
+        )
+        self.register(
+            r'I visit (\w+)',
+            self._step_navigate,
+        )
+        # Navigation to "the X page" pattern
+        self.register(
+            r'I (?:navigate|go) to the (\w+) page',
+            self._step_navigate,
+        )
+        self.register(
+            r'I am on the (\w+) page',
             self._step_navigate,
         )
 
@@ -87,6 +144,10 @@ class GherkinStepRegistry:
         )
 
         # Input steps
+        self.register(
+            r'I press Tab',
+            self._step_press_tab,
+        )
         self.register(
             r'I (?:enter|type|fill in) "([^"]*)" (?:in|into) (?:the )?"([^"]*)"(?: field| input)?',
             self._step_fill,
@@ -137,10 +198,40 @@ class GherkinStepRegistry:
             r'(?:the )?element "([^"]*)" should have (?:text|value) "([^"]*)"',
             self._step_element_has_text,
         )
+        self.register(
+            r'(?:the )?"([^"]+)" should be (?:enabled|clickable)',
+            self._step_element_enabled,
+        )
+        self.register(
+            r'(?:the )?"([^"]+)" should (?:be disabled|not be (?:enabled|clickable))',
+            self._step_element_disabled,
+        )
+
+        # CSS selector visibility assertions (e.g., ".cardArtwork" is visible)
+        self.register(
+            r'"([^"]+)" is visible',
+            self._step_selector_visible,
+        )
+        self.register(
+            r'"([^"]+)" is (?:hidden|not visible)',
+            self._step_selector_hidden,
+        )
+        self.register(
+            r'"([^"]+)" should be visible',
+            self._step_selector_visible,
+        )
+        self.register(
+            r'"([^"]+)" should be hidden',
+            self._step_selector_hidden,
+        )
+        self.register(
+            r'"([^"]+)" should not be visible',
+            self._step_selector_hidden,
+        )
 
         # Wait steps
         self.register(
-            r'I wait for (\d+) seconds?',
+            r'I wait (?:for )?(\d+) seconds?',
             self._step_wait,
         )
         self.register(
@@ -197,18 +288,38 @@ class GherkinStepRegistry:
     # Built-in step implementations
     # These are async methods that take (page, *args) where page is a Playwright page
 
-    async def _step_navigate(self, page, url: str):
-        """Navigate to URL."""
+    async def _step_navigate(self, page, url_or_page: str):
+        """Navigate to URL or named page.
+
+        If the input matches a named page, uses the page's configured path.
+        Otherwise treats it as a URL/path.
+        """
+        # Check if this is a named page
+        resolved_path = self.resolve_page(url_or_page)
+        if resolved_path:
+            url = resolved_path
+            logger.info(f"Resolved page '{url_or_page}' to path '{url}'")
+        else:
+            url = url_or_page
+
         # Handle relative URLs
         if not url.startswith(("http://", "https://")):
             base_url = getattr(page, "_base_url", "")
-            url = f"{base_url.rstrip('/')}/{url.lstrip('/')}"
+            logger.info(f"Navigation: resolved path='{url}', base_url='{base_url}'")
+            # Ensure path starts with /
+            if not url.startswith("/"):
+                url = f"/{url}"
+            url = f"{base_url.rstrip('/')}{url}"
+
+        logger.info(f"Navigating to: {url}")
         await page.goto(url, wait_until="domcontentloaded")
 
     async def _step_click(self, page, text: str):
-        """Click element by text, role, or common selector."""
-        # Try multiple strategies
-        locator = page.get_by_role("button", name=text).or_(
+        """Click element by test-id, text, or role."""
+        # Try multiple strategies: test-id first, then role, then text
+        locator = page.get_by_test_id(text).or_(
+            page.get_by_role("button", name=text)
+        ).or_(
             page.get_by_role("link", name=text)
         ).or_(
             page.get_by_text(text, exact=True)
@@ -223,8 +334,11 @@ class GherkinStepRegistry:
         """Click element by CSS selector."""
         await page.locator(selector).first.click()
 
+    async def _step_press_tab(self, page):
+        await page.locator("body").press("Tab")  # Trigger blur/validation
+
     async def _step_fill(self, page, value: str, field: str):
-        """Fill input field."""
+        """Fill input field with simulated typing to trigger validation."""
         locator = page.get_by_label(field).or_(
             page.get_by_placeholder(field)
         ).or_(
@@ -232,15 +346,22 @@ class GherkinStepRegistry:
         ).or_(
             page.locator(f'#{field}')
         )
-        await locator.first.fill(value)
+        element = locator.first
+        await element.clear()
+        await element.press_sequentially(value)
+
 
     async def _step_fill_reversed(self, page, field: str, value: str):
         """Fill input field (reversed argument order)."""
         await self._step_fill(page, value, field)
 
+
     async def _step_fill_selector(self, page, selector: str, value: str):
-        """Fill input by CSS selector."""
-        await page.locator(selector).first.fill(value)
+        """Fill input by CSS selector with simulated typing."""
+        element = page.locator(selector).first
+        await element.clear()
+        await element.press_sequentially(value)
+
 
     async def _step_clear(self, page, field: str):
         """Clear input field."""
@@ -282,6 +403,53 @@ class GherkinStepRegistry:
         """Assert element has specific text."""
         from playwright.async_api import expect
         await expect(page.locator(selector).first).to_have_text(text)
+
+    async def _step_element_enabled(self, page, text: str):
+        """Assert element is enabled/clickable (checks both HTML disabled and CSS classes)."""
+        from playwright.async_api import expect
+        locator = page.get_by_test_id(text).or_(
+            page.get_by_role("button", name=text)
+        ).or_(
+            page.get_by_role("link", name=text)
+        ).or_(
+            page.get_by_text(text, exact=True)
+        )
+        element = locator.first
+        # Check HTML disabled attribute
+        await expect(element).to_be_enabled()
+        # Check common CSS disabled patterns
+        class_attr = await element.get_attribute("class") or ""
+        classes = {c.lower() for c in class_attr.split()}
+        for pattern in self.DISABLED_CSS_PATTERNS:
+            if pattern.lower() in classes:
+                raise AssertionError(f"Element has disabled CSS class: {class_attr}")
+
+    async def _step_element_disabled(self, page, text: str):
+        """Assert element is disabled (checks both HTML disabled and CSS classes)."""
+        locator = page.get_by_test_id(text).or_(
+            page.get_by_role("button", name=text)
+        ).or_(
+            page.get_by_role("link", name=text)
+        ).or_(
+            page.get_by_text(text, exact=True)
+        )
+        element = locator.first
+        # Check common CSS disabled patterns first
+        class_attr = await element.get_attribute("class") or ""
+        classes = {c.lower() for c in class_attr.split()}
+        has_disabled_class = bool(classes & {p.lower() for p in self.DISABLED_CSS_PATTERNS})
+        # Check HTML disabled attribute
+        is_html_disabled = await element.is_disabled()
+        if not has_disabled_class and not is_html_disabled:
+            raise AssertionError(f"Element is not disabled. Class: {class_attr}")
+
+    async def _step_selector_visible(self, page, selector: str):
+        """Assert element matching CSS selector is visible."""
+        await page.locator(selector).first.wait_for(state="visible", timeout=10000)
+
+    async def _step_selector_hidden(self, page, selector: str):
+        """Assert element matching CSS selector is hidden."""
+        await page.locator(selector).first.wait_for(state="hidden", timeout=10000)
 
     async def _step_wait(self, page, seconds: str):
         """Wait for specified seconds."""
@@ -335,19 +503,24 @@ class GherkinStepRegistry:
 class TestExecutor:
     """Executes Gherkin scenarios using Playwright."""
 
-    def __init__(self, browser: str = "chrome"):
+    def __init__(self, browser: str = "chrome", pages: Optional[dict[str, str]] = None):
         """
         Initialize the test executor.
 
         Args:
             browser: Browser to use ('chrome' or 'firefox')
+            pages: Optional dict of page_name -> path for named page navigation
         """
         self.settings = get_settings()
         self.browser = browser
-        self.step_registry = GherkinStepRegistry()
+        self.step_registry = GherkinStepRegistry(pages=pages)
         self._playwright = None
         self._browser = None
         self._context = None
+
+    def set_pages(self, pages: dict[str, str]):
+        """Set pages for named page navigation."""
+        self.step_registry.set_pages(pages)
 
     def _get_browser_url(self) -> str:
         """Get the WebSocket URL for the selected browser."""
@@ -387,11 +560,18 @@ class TestExecutor:
             self._playwright = None
         logger.info("Disconnected from browser")
 
-    async def create_context(self, base_url: str) -> None:
+    async def create_context(
+        self,
+        base_url: str,
+        locale: str = "en-GB",
+        timezone_id: str = "Europe/London",
+    ) -> None:
         """Create a new browser context."""
         self._context = await self._browser.new_context(
             viewport={"width": 1280, "height": 720},
             ignore_https_errors=True,
+            locale=locale,
+            timezone_id=timezone_id,
         )
         # Store base URL for relative navigation
         self._base_url = base_url
@@ -716,7 +896,10 @@ async def run_test_execution(
     scenarios: list[dict],
     browser: str,
     base_url: str,
+    locale: str = "en-GB",
+    timezone_id: str = "Europe/London",
     custom_steps: Optional[dict[str, str]] = None,
+    pages: Optional[dict[str, str]] = None,
     progress_callback: Optional[Callable[[str], None]] = None,
 ) -> TestExecutionResult:
     """
@@ -728,6 +911,7 @@ async def run_test_execution(
         browser: Browser name
         base_url: Base URL for tests
         custom_steps: Optional custom step definitions
+        pages: Optional dict of page_name -> path for named page navigation
         progress_callback: Optional callback for progress updates
 
     Returns:
@@ -744,14 +928,14 @@ async def run_test_execution(
     )
 
     start_time = time.time()
-    executor = TestExecutor(browser=browser)
+    executor = TestExecutor(browser=browser, pages=pages)
 
     try:
         report_progress(f"Connecting to {browser} browser...")
         await executor.connect()
 
-        report_progress(f"Creating browser context for {base_url}...")
-        await executor.create_context(base_url)
+        report_progress(f"Creating browser context for {base_url} (locale={locale})...")
+        await executor.create_context(base_url, locale=locale, timezone_id=timezone_id)
 
         total_scenarios = len(scenarios)
         for idx, scenario in enumerate(scenarios, 1):

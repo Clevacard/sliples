@@ -42,6 +42,8 @@ export default function EnvironmentForm({
 }: EnvironmentFormProps) {
   const [name, setName] = useState('')
   const [baseUrl, setBaseUrl] = useState('')
+  const [locale, setLocale] = useState('en-GB')
+  const [timezoneId, setTimezoneId] = useState('Europe/London')
   const [variables, setVariables] = useState<KeyValuePair[]>([])
   const [retentionDays, setRetentionDays] = useState(365)
   const [errors, setErrors] = useState<Record<string, string>>({})
@@ -53,11 +55,15 @@ export default function EnvironmentForm({
     if (environment) {
       setName(environment.name)
       setBaseUrl(environment.base_url)
+      setLocale(environment.locale || 'en-GB')
+      setTimezoneId(environment.timezone_id || 'Europe/London')
       setVariables(recordToPairs(environment.variables || {}))
       setRetentionDays(environment.retention_days || 365)
     } else {
       setName('')
       setBaseUrl('')
+      setLocale('en-GB')
+      setTimezoneId('Europe/London')
       setVariables([])
       setRetentionDays(365)
     }
@@ -102,6 +108,8 @@ export default function EnvironmentForm({
     const data = {
       name: name.trim(),
       base_url: baseUrl.trim(),
+      locale: locale.trim(),
+      timezone_id: timezoneId.trim(),
       variables: pairsToRecord(variables),
       retention_days: retentionDays,
     }
@@ -151,6 +159,70 @@ export default function EnvironmentForm({
         {errors.baseUrl && (
           <p className="mt-1 text-sm text-red-400">{errors.baseUrl}</p>
         )}
+      </div>
+
+      {/* Locale and Timezone */}
+      <div className="grid grid-cols-2 gap-4">
+        <div>
+          <label htmlFor="env-locale" className="block text-sm font-medium text-gray-300 mb-1">
+            Browser Locale
+          </label>
+          <select
+            id="env-locale"
+            className="w-full px-3 py-2 bg-gray-700 border border-gray-600 rounded-lg text-gray-100 focus:outline-none focus:ring-2 focus:ring-primary-500 focus:border-transparent"
+            value={locale}
+            onChange={(e) => setLocale(e.target.value)}
+            disabled={isLoading}
+          >
+            <option value="en-GB">English (UK)</option>
+            <option value="en-US">English (US)</option>
+            <option value="de-DE">German</option>
+            <option value="fr-FR">French</option>
+            <option value="es-ES">Spanish</option>
+            <option value="it-IT">Italian</option>
+            <option value="pt-BR">Portuguese (Brazil)</option>
+            <option value="nl-NL">Dutch</option>
+            <option value="pl-PL">Polish</option>
+            <option value="ar-SA">Arabic (Saudi Arabia)</option>
+            <option value="he-IL">Hebrew</option>
+            <option value="zh-CN">Chinese (Simplified)</option>
+            <option value="ja-JP">Japanese</option>
+            <option value="ko-KR">Korean</option>
+          </select>
+          <p className="mt-1 text-xs text-gray-500">
+            Affects number/date formatting and text direction (LTR/RTL)
+          </p>
+        </div>
+        <div>
+          <label htmlFor="env-timezone" className="block text-sm font-medium text-gray-300 mb-1">
+            Timezone
+          </label>
+          <select
+            id="env-timezone"
+            className="w-full px-3 py-2 bg-gray-700 border border-gray-600 rounded-lg text-gray-100 focus:outline-none focus:ring-2 focus:ring-primary-500 focus:border-transparent"
+            value={timezoneId}
+            onChange={(e) => setTimezoneId(e.target.value)}
+            disabled={isLoading}
+          >
+            <option value="Europe/London">Europe/London (GMT/BST)</option>
+            <option value="Europe/Paris">Europe/Paris (CET)</option>
+            <option value="Europe/Berlin">Europe/Berlin (CET)</option>
+            <option value="America/New_York">America/New_York (EST)</option>
+            <option value="America/Los_Angeles">America/Los_Angeles (PST)</option>
+            <option value="America/Chicago">America/Chicago (CST)</option>
+            <option value="America/Sao_Paulo">America/Sao_Paulo (BRT)</option>
+            <option value="Asia/Tokyo">Asia/Tokyo (JST)</option>
+            <option value="Asia/Shanghai">Asia/Shanghai (CST)</option>
+            <option value="Asia/Dubai">Asia/Dubai (GST)</option>
+            <option value="Asia/Kolkata">Asia/Kolkata (IST)</option>
+            <option value="Asia/Riyadh">Asia/Riyadh (AST)</option>
+            <option value="Australia/Sydney">Australia/Sydney (AEST)</option>
+            <option value="UTC">UTC</option>
+          </select>
+          <p className="mt-1 text-xs text-gray-500">
+            Browser timezone for date/time display
+          </p>
+        </div>
       </div>
 
       {/* Retention Days */}

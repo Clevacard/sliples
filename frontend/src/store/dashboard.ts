@@ -15,6 +15,7 @@ export interface TestRun {
 
 export interface Repo {
   id: string
+  project_id?: string
   name: string
   git_url: string
   branch: string
@@ -47,7 +48,7 @@ interface DashboardState {
   clearError: () => void
 }
 
-export const useDashboardStore = create<DashboardState>((set, get) => ({
+export const useDashboardStore = create<DashboardState>((set) => ({
   // Initial state
   stats: null,
   recentRuns: [],
@@ -60,7 +61,7 @@ export const useDashboardStore = create<DashboardState>((set, get) => ({
 
   // Fetch all dashboard data
   fetchDashboardData: async () => {
-    set({ isLoading: true, error: null })
+    set({ isLoading: true, error: null, stats: null, recentRuns: [], repos: [] })
     try {
       const [stats, runs, repos] = await Promise.all([
         getDashboardStats(),

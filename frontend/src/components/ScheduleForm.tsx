@@ -30,7 +30,7 @@ export default function ScheduleForm({
 }: ScheduleFormProps) {
   const [name, setName] = useState('')
   const [cronExpression, setCronExpression] = useState('0 9 * * *')
-  const [environmentId, setEnvironmentId] = useState('')
+  const [environmentIds, setEnvironmentIds] = useState<string[]>([])
   const [browsers, setBrowsers] = useState<string[]>(['chromium'])
   const [scenarioTags, setScenarioTags] = useState<string[]>([])
   const [scenarioIds, setScenarioIds] = useState<string[]>([])
@@ -75,7 +75,7 @@ export default function ScheduleForm({
 
         // Set default environment if none selected
         if (!schedule && envs.length > 0) {
-          setEnvironmentId(envs[0].id)
+          setEnvironmentIds([envs[0].id])
         }
       } catch (err) {
         console.error('Failed to load form data:', err)
@@ -91,7 +91,12 @@ export default function ScheduleForm({
     if (schedule) {
       setName(schedule.name)
       setCronExpression(schedule.cron_expression)
-      setEnvironmentId(schedule.environment_id)
+      // Support both old single environment_id and new environment_ids array
+      if (schedule.environment_ids && schedule.environment_ids.length > 0) {
+        setEnvironmentIds(schedule.environment_ids)
+      } else if (schedule.environment_id) {
+        setEnvironmentIds([schedule.environment_id])
+      }
       setBrowsers(schedule.browsers || ['chromium'])
       setScenarioTags(schedule.scenario_tags || [])
       setScenarioIds(schedule.scenario_ids || [])
@@ -128,8 +133,8 @@ export default function ScheduleForm({
       newErrors.cronExpression = 'Invalid cron expression format'
     }
 
-    if (!environmentId) {
-      newErrors.environmentId = 'Environment is required'
+    if (environmentIds.length === 0) {
+      newErrors.environmentIds = 'Select at least one environment'
     }
 
     if (browsers.length === 0) {
@@ -158,7 +163,7 @@ export default function ScheduleForm({
     const data: ScheduleCreate | ScheduleUpdate = {
       name: name.trim(),
       cron_expression: cronExpression,
-      environment_id: environmentId,
+      environment_ids: environmentIds,
       browsers,
       scenario_tags: selectionMode === 'tags' ? scenarioTags : [],
       scenario_ids: selectionMode === 'scenarios' ? scenarioIds : [],
@@ -173,6 +178,14 @@ export default function ScheduleForm({
       prev.includes(browserId)
         ? prev.filter((b) => b !== browserId)
         : [...prev, browserId]
+    )
+  }
+
+  const toggleEnv = (envId: string) => {
+    setEnvironmentIds((prev) =>
+      prev.includes(envId)
+        ? prev.filter((id) => id !== envId)
+        : [...prev, envId]
     )
   }
 
@@ -245,29 +258,37 @@ export default function ScheduleForm({
         )}
       </div>
 
-      {/* Environment */}
+      {/* Environments */}
       <div>
-        <label htmlFor="schedule-env" className="block text-sm font-medium text-gray-300 mb-1">
-          Environment <span className="text-red-400">*</span>
+        <label className="block text-sm font-medium text-gray-300 mb-2">
+          Environments <span className="text-red-400">*</span>
         </label>
-        <select
-          id="schedule-env"
-          className={`w-full px-3 py-2 bg-gray-700 border rounded-lg text-gray-100 focus:outline-none focus:ring-2 focus:ring-primary-500 ${
-            errors.environmentId ? 'border-red-500' : 'border-gray-600'
-          }`}
-          value={environmentId}
-          onChange={(e) => setEnvironmentId(e.target.value)}
-          disabled={isLoading}
-        >
-          <option value="">Select environment...</option>
+        <div className="grid grid-cols-2 gap-2">
           {environments.map((env) => (
-            <option key={env.id} value={env.id}>
-              {env.name} ({env.base_url})
-            </option>
+            <label
+              key={env.id}
+              className={`flex items-center gap-2 p-2 rounded-lg border cursor-pointer transition-colors ${
+                environmentIds.includes(env.id)
+                  ? 'border-primary-500 bg-primary-500/10'
+                  : 'border-gray-600 bg-gray-700 hover:border-gray-500'
+              } ${isLoading ? 'opacity-50 cursor-not-allowed' : ''}`}
+            >
+              <input
+                type="checkbox"
+                checked={environmentIds.includes(env.id)}
+                onChange={() => toggleEnv(env.id)}
+                disabled={isLoading}
+                className="w-4 h-4 rounded border-gray-500 bg-gray-600 text-primary-500 focus:ring-primary-500"
+              />
+              <div className="min-w-0 flex-1">
+                <p className="text-sm font-medium text-gray-200 truncate">{env.name}</p>
+                <p className="text-xs text-gray-400 truncate">{env.base_url}</p>
+              </div>
+            </label>
           ))}
-        </select>
-        {errors.environmentId && (
-          <p className="mt-1 text-sm text-red-400">{errors.environmentId}</p>
+        </div>
+        {errors.environmentIds && (
+          <p className="mt-1 text-sm text-red-400">{errors.environmentIds}</p>
         )}
       </div>
 
@@ -454,6 +475,28 @@ export default function ScheduleForm({
           />
         </button>
       </div>
+
+      {/* Summary */}
+      {environmentIds.length > 0 && browsers.length > 0 && (
+        <div className="p-3 bg-gray-700/50 rounded-lg">
+          <p className="text-sm font-medium text-gray-300 mb-2">
+            Schedule will create {environmentIds.length * browsers.length} run{environmentIds.length * browsers.length !== 1 ? 's' : ''} per trigger:
+          </p>
+          <div className="flex flex-wrap gap-1">
+            {environmentIds.map((envId) => {
+              const env = environments.find((e) => e.id === envId)
+              return browsers.map((browser) => (
+                <span
+                  key={`${envId}-${browser}`}
+                  className="px-2 py-1 text-xs bg-gray-600 text-gray-200 rounded"
+                >
+                  {env?.name || 'Unknown'} / {browser}
+                </span>
+              ))
+            })}
+          </div>
+        </div>
+      )}
 
       {/* Actions */}
       <div className="flex justify-end gap-3 pt-4 border-t border-gray-700">

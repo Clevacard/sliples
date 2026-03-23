@@ -6,6 +6,7 @@ from enum import Enum
 
 from sqlalchemy import Column, String, DateTime, Boolean, Enum as SQLEnum
 from sqlalchemy.dialects.postgresql import UUID
+from sqlalchemy.orm import relationship
 
 from app.database import Base
 
@@ -31,6 +32,9 @@ class User(Base):
     role = Column(SQLEnum(UserRole), default=UserRole.user, nullable=False)
     created_at = Column(DateTime, default=datetime.utcnow, nullable=False)
     last_login = Column(DateTime, nullable=True)
+
+    # Relationships
+    project_memberships = relationship("ProjectMember", back_populates="user", cascade="all, delete-orphan")
 
     def __repr__(self) -> str:
         return f"<User(id={self.id}, email={self.email}, role={self.role})>"

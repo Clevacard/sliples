@@ -17,6 +17,7 @@ class Schedule(Base):
     __tablename__ = "schedules"
 
     id = Column(UUID(as_uuid=True), primary_key=True, default=uuid.uuid4)
+    project_id = Column(UUID(as_uuid=True), ForeignKey("projects.id", ondelete="CASCADE"), nullable=True)
     name = Column(String(100), nullable=False)
     cron_expression = Column(String(100), nullable=False)
 
@@ -25,7 +26,7 @@ class Schedule(Base):
     scenario_ids = Column(ARRAY(UUID(as_uuid=True)), default=[])
 
     # Where and how to run
-    environment_id = Column(UUID(as_uuid=True), ForeignKey("environments.id"), nullable=False)
+    environment_ids = Column(ARRAY(UUID(as_uuid=True)), default=[])
     browsers = Column(ARRAY(String), default=["chromium"])
 
     # Status
@@ -42,4 +43,4 @@ class Schedule(Base):
     updated_at = Column(DateTime, default=datetime.utcnow, onupdate=datetime.utcnow)
 
     # Relationships
-    environment = relationship("Environment")
+    project = relationship("Project", back_populates="schedules")

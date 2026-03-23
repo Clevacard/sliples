@@ -26,7 +26,7 @@ interface UsersState {
   clearError: () => void
 }
 
-export const useUsersStore = create<UsersState>()((set, get) => ({
+export const useUsersStore = create<UsersState>()((set) => ({
   // Initial state
   users: [],
   isLoading: false,

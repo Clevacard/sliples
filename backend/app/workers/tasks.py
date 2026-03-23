@@ -7,10 +7,36 @@ from uuid import UUID
 
 from app.workers.celery_app import celery_app
 from app.database import SessionLocal
-from app.models import ScenarioRepo, TestRun, TestResult, RunStatus, StepStatus, Scenario, CustomStep
+from app.models import ScenarioRepo, TestRun, TestResult, RunStatus, StepStatus, Scenario, CustomStep, Page, PageEnvironmentOverride
 from app.services.s3_service import S3Service
 from app.services.test_executor import run_test_execution
 from app.services.websocket_pubsub import run_update_publisher
+
+
+def load_pages_for_environment(db, project_id, environment_id) -> dict[str, str]:
+    """Load page name -> path mapping for an environment."""
+    if not project_id:
+        return {}
+
+    pages = db.query(Page).filter(Page.project_id == project_id).all()
+    if not pages:
+        return {}
+
+    # Build override lookup for this environment
+    override_map = {}
+    overrides = db.query(PageEnvironmentOverride).filter(
+        PageEnvironmentOverride.environment_id == environment_id
+    ).all()
+    for override in overrides:
+        override_map[override.page_id] = override.path
+
+    # Build page_name -> path mapping
+    result = {}
+    for page in pages:
+        path = override_map.get(page.id, page.path)
+        result[page.name] = path
+
+    return result
 
 logger = logging.getLogger(__name__)
 
@@ -130,6 +156,17 @@ def execute_test_run(self, run_id: str):
         for step in custom_step_records:
             custom_steps[step.pattern] = step.code
 
+        # Load pages for named page navigation
+        # Try environment's project_id, then run's project_id
+        project_id = environment.project_id or run.project_id
+        update_progress("Loading page definitions...")
+        logger.info(f"Loading pages for project_id={project_id}, environment_id={environment.id}")
+        pages = load_pages_for_environment(db, project_id, environment.id)
+        if pages:
+            logger.info(f"Loaded {len(pages)} page definitions: {list(pages.keys())}")
+        else:
+            logger.info("No page definitions found")
+
         # Run the test execution asynchronously
         update_progress(f"Connecting to {run.browser} browser...")
         loop = asyncio.new_event_loop()
@@ -142,7 +179,10 @@ def execute_test_run(self, run_id: str):
                     scenarios=scenario_data,
                     browser=run.browser,
                     base_url=base_url,
+                    locale=environment.locale or "en-GB",
+                    timezone_id=environment.timezone_id or "Europe/London",
                     custom_steps=custom_steps if custom_steps else None,
+                    pages=pages if pages else None,
                     progress_callback=update_progress,
                 )
             )
@@ -546,13 +586,18 @@ def execute_scheduled_run(self, schedule_id: str):
             logger.info(f"Schedule {schedule_id} is disabled, skipping")
             return {"success": False, "error": "Schedule is disabled"}
 
-        # Get environment
-        environment = db.query(Environment).filter(
-            Environment.id == schedule.environment_id
-        ).first()
-        if not environment:
-            logger.error(f"Environment {schedule.environment_id} not found for schedule {schedule_id}")
-            return {"success": False, "error": "Environment not found"}
+        # Get environments
+        environment_ids = schedule.environment_ids or []
+        if not environment_ids:
+            logger.error(f"No environments configured for schedule {schedule_id}")
+            return {"success": False, "error": "No environments configured"}
+
+        environments = db.query(Environment).filter(
+            Environment.id.in_(environment_ids)
+        ).all()
+        if not environments:
+            logger.error(f"No valid environments found for schedule {schedule_id}")
+            return {"success": False, "error": "Environments not found"}
 
         logger.info(f"Executing scheduled run: {schedule.name} (ID: {schedule_id})")
 
@@ -573,27 +618,28 @@ def execute_scheduled_run(self, schedule_id: str):
             logger.warning(f"No scenarios to run for schedule {schedule_id}")
             return {"success": False, "error": "No scenarios to execute"}
 
-        # Create test runs for each browser
+        # Create test runs for each environment and browser combination
         browsers = schedule.browsers or ["chromium"]
         run_ids = []
 
-        for browser in browsers:
-            # Create a new test run
-            run = TestRun(
-                scenario_ids=scenario_ids,
-                environment_id=schedule.environment_id,
-                status=RunStatus.QUEUED,
-                browser=browser,
-                triggered_by=f"schedule:{schedule.name}",
-                parallel=True,
-            )
-            db.add(run)
-            db.flush()
+        for environment in environments:
+            for browser in browsers:
+                # Create a new test run
+                run = TestRun(
+                    scenario_ids=scenario_ids,
+                    environment_id=environment.id,
+                    status=RunStatus.QUEUED,
+                    browser=browser,
+                    triggered_by=f"schedule:{schedule.name}",
+                    parallel=True,
+                )
+                db.add(run)
+                db.flush()
 
-            run_ids.append(str(run.id))
+                run_ids.append(str(run.id))
 
-            # Queue the test execution
-            execute_test_run.delay(str(run.id))
+                # Queue the test execution
+                execute_test_run.delay(str(run.id))
 
         # Update schedule tracking
         now = datetime.utcnow()

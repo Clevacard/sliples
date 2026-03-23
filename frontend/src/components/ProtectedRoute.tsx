@@ -1,4 +1,4 @@
-import { useEffect, useState } from 'react'
+import { useEffect } from 'react'
 import { Navigate, useLocation } from 'react-router-dom'
 import { useAuthStore } from '../store/auth'
 
@@ -9,21 +9,13 @@ interface ProtectedRouteProps {
 export default function ProtectedRoute({ children }: ProtectedRouteProps) {
   const location = useLocation()
   const { isAuthenticated, isLoading, user, fetchCurrentUser, setLoading } = useAuthStore()
-  const [hasApiKey, setHasApiKey] = useState(false)
 
   // Check authentication on mount
   useEffect(() => {
-    const apiKey = localStorage.getItem('sliples_api_key')
-    setHasApiKey(!!apiKey)
-
-    if (apiKey) {
-      // API key auth - mark as ready without calling /auth/me
-      setLoading(false)
-    } else if (!user) {
-      // No API key and no user - try to fetch current user from session
+    if (!user) {
+      // Try to fetch current user from session cookie
       fetchCurrentUser()
     } else {
-      // Already have user
       setLoading(false)
     }
   }, [fetchCurrentUser, user, setLoading])
@@ -61,8 +53,8 @@ export default function ProtectedRoute({ children }: ProtectedRouteProps) {
     )
   }
 
-  // Redirect to login if not authenticated (but allow if API key is present)
-  if (!isAuthenticated && !hasApiKey) {
+  // Redirect to login if not authenticated
+  if (!isAuthenticated) {
     return <Navigate to="/login" state={{ from: location }} replace />
   }
 

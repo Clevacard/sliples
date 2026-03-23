@@ -18,7 +18,7 @@ function TrendChart({ data }: { data: { date: string; passed: number; failed: nu
 
   return (
     <div className="flex items-end gap-1 h-32">
-      {data.map((day, i) => {
+      {data.map((day) => {
         const total = day.passed + day.failed
         const passedHeight = total > 0 ? (day.passed / maxValue) * 100 : 0
         const failedHeight = total > 0 ? (day.failed / maxValue) * 100 : 0

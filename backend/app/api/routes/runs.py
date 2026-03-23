@@ -14,8 +14,13 @@ from pydantic import BaseModel
 from redis.asyncio import Redis as AsyncRedis
 
 from app.database import get_db, SessionLocal
-from app.models import TestRun, TestResult, Environment, RunStatus, Scenario
-from app.api.deps import get_api_key_or_user
+from app.models import TestRun, TestResult, Environment, RunStatus, Scenario, Project, ApiKey
+from app.api.deps import (
+    get_api_key_or_user,
+    verify_project_access,
+    get_validated_api_key,
+    can_write_to_project,
+)
 from app.config import get_settings
 from app.workers.tasks import execute_test_run
 from app.services.websocket_pubsub import get_run_channel, get_redis_async
@@ -36,16 +41,17 @@ class TestRunCreate(BaseModel):
 
 class TestRunResponse(BaseModel):
     id: UUID
+    project_id: Optional[UUID] = None
     scenario_ids: list[UUID]
     environment_id: UUID
     status: str
     browser: str
     browser_version: str
-    triggered_by: Optional[str]
+    triggered_by: Optional[str] = None
     parallel: bool
     progress_message: Optional[str] = None
-    started_at: Optional[datetime]
-    finished_at: Optional[datetime]
+    started_at: Optional[datetime] = None
+    finished_at: Optional[datetime] = None
     created_at: datetime
 
     class Config:
@@ -78,9 +84,13 @@ async def list_runs(
     offset: int = 0,
     db: Session = Depends(get_db),
     auth = Depends(get_api_key_or_user),
+    project: Optional[Project] = Depends(verify_project_access),
 ):
-    """List test runs."""
+    """List test runs, optionally filtered by project."""
     query = db.query(TestRun).order_by(TestRun.created_at.desc())
+
+    if project:
+        query = query.filter(TestRun.project_id == project.id)
 
     if status_filter:
         query = query.filter(TestRun.status == status_filter)
@@ -96,6 +106,8 @@ async def create_run(
     run: TestRunCreate,
     db: Session = Depends(get_db),
     auth = Depends(get_api_key_or_user),
+    project: Optional[Project] = Depends(verify_project_access),
+    api_key: Optional[ApiKey] = Depends(get_validated_api_key),
 ):
     """
     Trigger a new test run.
@@ -106,17 +118,30 @@ async def create_run(
 
     If both are provided, scenario_ids take precedence.
     """
-    # Find environment
-    env = db.query(Environment).filter(Environment.name == run.environment).first()
+    # Check write permissions
+    if not can_write_to_project(db, auth, project, api_key):
+        raise HTTPException(
+            status_code=status.HTTP_403_FORBIDDEN,
+            detail="You don't have permission to create test runs in this project",
+        )
+
+    # Find environment (within project if specified)
+    env_query = db.query(Environment).filter(Environment.name == run.environment)
+    if project:
+        env_query = env_query.filter(Environment.project_id == project.id)
+    env = env_query.first()
     if not env:
         raise HTTPException(status_code=404, detail=f"Environment '{run.environment}' not found")
 
     # Resolve scenario IDs from tags if not provided explicitly
     scenario_ids = run.scenario_ids
     if not scenario_ids and run.scenario_tags:
-        # Find scenarios matching any of the tags
+        # Find scenarios matching any of the tags (within project if specified)
         tag_filters = [Scenario.tags.contains([t]) for t in run.scenario_tags]
-        scenarios = db.query(Scenario).filter(or_(*tag_filters)).all()
+        scenario_query = db.query(Scenario).filter(or_(*tag_filters))
+        if project:
+            scenario_query = scenario_query.filter(Scenario.project_id == project.id)
+        scenarios = scenario_query.all()
         scenario_ids = [s.id for s in scenarios]
 
         if not scenario_ids:
@@ -125,9 +150,12 @@ async def create_run(
                 detail=f"No scenarios found matching tags: {run.scenario_tags}",
             )
 
-    # If no scenario_ids or tags provided, run ALL scenarios
+    # If no scenario_ids or tags provided, run ALL scenarios (within project)
     if not scenario_ids:
-        scenarios = db.query(Scenario).all()
+        scenario_query = db.query(Scenario)
+        if project:
+            scenario_query = scenario_query.filter(Scenario.project_id == project.id)
+        scenarios = scenario_query.all()
         scenario_ids = [s.id for s in scenarios]
 
         if not scenario_ids:
@@ -144,6 +172,7 @@ async def create_run(
     browser = run.browsers[0] if run.browsers else "chrome"
 
     db_run = TestRun(
+        project_id=project.id if project else None,
         scenario_ids=scenario_ids,
         environment_id=env.id,
         status=RunStatus.QUEUED,
@@ -226,17 +255,58 @@ async def get_screenshot(path: str):
 async def get_run_report(
     run_id: UUID,
     db: Session = Depends(get_db),
-    auth = Depends(get_api_key_or_user),
 ):
-    """Get the HTML report for a test run."""
+    """
+    Get the HTML report for a test run.
+
+    Note: No auth required - URLs contain UUIDs and are not guessable.
+    """
     run = db.query(TestRun).filter(TestRun.id == run_id).first()
     if not run:
         raise HTTPException(status_code=404, detail="Test run not found")
 
     if not run.report_html:
-        raise HTTPException(status_code=404, detail="Report not yet generated")
+        # Try to generate report on-the-fly if run is complete
+        if run.status.value in ["passed", "failed", "error", "cancelled"]:
+            try:
+                from app.services.report_generator import ReportGenerator
+                report_gen = ReportGenerator(db)
+                report_gen.save_report(str(run_id))
+                db.refresh(run)
+            except Exception as e:
+                logger.error(f"Failed to generate report on-demand: {e}")
+                raise HTTPException(status_code=404, detail=f"Report generation failed: {str(e)}")
+        else:
+            raise HTTPException(status_code=404, detail="Report not yet generated - run is still in progress")
+
+    if not run.report_html:
+        raise HTTPException(status_code=404, detail="Report could not be generated")
 
     return Response(content=run.report_html, media_type="text/html")
+
+
+@router.post("/runs/{run_id}/report")
+async def regenerate_run_report(
+    run_id: UUID,
+    db: Session = Depends(get_db),
+    auth = Depends(get_api_key_or_user),
+):
+    """Regenerate the HTML report for a test run."""
+    run = db.query(TestRun).filter(TestRun.id == run_id).first()
+    if not run:
+        raise HTTPException(status_code=404, detail="Test run not found")
+
+    if run.status.value not in ["passed", "failed", "error", "cancelled"]:
+        raise HTTPException(status_code=400, detail="Cannot generate report - run is still in progress")
+
+    try:
+        from app.services.report_generator import ReportGenerator
+        report_gen = ReportGenerator(db)
+        report_gen.save_report(str(run_id))
+        return {"status": "success", "message": "Report regenerated successfully"}
+    except Exception as e:
+        logger.error(f"Failed to regenerate report: {e}")
+        raise HTTPException(status_code=500, detail=f"Report generation failed: {str(e)}")
 
 
 @router.get("/runs/{run_id}/status")

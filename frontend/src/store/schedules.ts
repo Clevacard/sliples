@@ -21,7 +21,7 @@ interface SchedulesState {
   clearError: () => void
 }
 
-export const useSchedulesStore = create<SchedulesState>((set, get) => ({
+export const useSchedulesStore = create<SchedulesState>((set) => ({
   // Initial state
   schedules: [],
   selectedSchedule: null,
@@ -30,7 +30,7 @@ export const useSchedulesStore = create<SchedulesState>((set, get) => ({
 
   // Fetch all schedules
   fetchSchedules: async () => {
-    set({ isLoading: true, error: null })
+    set({ isLoading: true, error: null, selectedSchedule: null })
     try {
       const schedules = await api.listSchedules()
       set({ schedules, isLoading: false })

@@ -162,7 +162,7 @@ export const useScenarioEditorStore = create<ScenarioEditorState>((set, get) => 
         }
 
         // Add scenarios as file nodes
-        scenarios.forEach((scenario) => {
+        scenarios.forEach((scenario: { id: string; name: string; feature_path: string }) => {
           featureNode!.children = featureNode!.children || []
           featureNode!.children.push({
             id: `scenario-${scenario.id}`,

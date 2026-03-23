@@ -25,12 +25,16 @@ export const api = axios.create({
   withCredentials: true, // Include cookies for session auth
 })
 
-// Add API key to requests
+// Add project context to requests
+// Note: We rely on httpOnly cookies for JWT auth in the browser.
+// API keys are only for CI/CD use (curl, scripts), not the web UI.
 api.interceptors.request.use((config) => {
-  const apiKey = localStorage.getItem('sliples_api_key')
-  if (apiKey) {
-    config.headers['X-API-Key'] = apiKey
+  // Add current project ID to all requests
+  const currentProjectId = localStorage.getItem('sliples_current_project_id')
+  if (currentProjectId) {
+    config.headers['X-Project-Id'] = currentProjectId
   }
+
   return config
 })
 
@@ -40,11 +44,96 @@ export async function checkHealth() {
   return response.data
 }
 
+// Projects
+export type ProjectRole = 'owner' | 'admin' | 'member' | 'viewer'
+
+export interface Project {
+  id: string
+  name: string
+  slug: string
+  description?: string
+  created_at: string
+  updated_at: string
+  member_count?: number
+  current_user_role?: ProjectRole
+}
+
+export interface ProjectMember {
+  id: string
+  user_id: string
+  email: string
+  name: string
+  role: ProjectRole
+  created_at: string
+}
+
+export interface ProjectCreate {
+  name: string
+  slug?: string
+  description?: string
+}
+
+export interface ProjectUpdate {
+  name?: string
+  description?: string
+}
+
+export async function getProjects(): Promise<Project[]> {
+  const response = await api.get('/projects')
+  return response.data
+}
+
+export async function getProject(id: string): Promise<Project & { members: ProjectMember[] }> {
+  const response = await api.get(`/projects/${id}`)
+  return response.data
+}
+
+export async function createProject(data: ProjectCreate): Promise<Project> {
+  const response = await api.post('/projects', data)
+  return response.data
+}
+
+export async function updateProject(id: string, data: ProjectUpdate): Promise<Project> {
+  const response = await api.put(`/projects/${id}`, data)
+  return response.data
+}
+
+export async function deleteProject(id: string): Promise<void> {
+  await api.delete(`/projects/${id}`)
+}
+
+export async function getProjectMembers(projectId: string): Promise<ProjectMember[]> {
+  const response = await api.get(`/projects/${projectId}/members`)
+  return response.data
+}
+
+export async function addProjectMember(projectId: string, email: string, role: ProjectRole): Promise<ProjectMember> {
+  const response = await api.post(`/projects/${projectId}/members`, { email, role })
+  return response.data
+}
+
+export async function updateProjectMemberRole(projectId: string, userId: string, role: ProjectRole): Promise<ProjectMember> {
+  const response = await api.put(`/projects/${projectId}/members/${userId}`, { role })
+  return response.data
+}
+
+export async function removeProjectMember(projectId: string, userId: string): Promise<void> {
+  await api.delete(`/projects/${projectId}/members/${userId}`)
+}
+
+export async function transferProjectOwnership(projectId: string, newOwnerUserId: string): Promise<Project> {
+  const response = await api.post(`/projects/${projectId}/transfer-ownership?new_owner_user_id=${newOwnerUserId}`)
+  return response.data
+}
+
 // Environments
 export interface Environment {
   id: string
+  project_id?: string
   name: string
   base_url: string
+  locale?: string
+  timezone_id?: string
   credentials_env?: string
   variables: Record<string, string>
   retention_days: number
@@ -55,6 +144,8 @@ export interface Environment {
 export interface EnvironmentCreate {
   name: string
   base_url: string
+  locale?: string
+  timezone_id?: string
   variables?: Record<string, string>
   retention_days?: number
 }
@@ -62,6 +153,8 @@ export interface EnvironmentCreate {
 export interface EnvironmentUpdate {
   name?: string
   base_url?: string
+  locale?: string
+  timezone_id?: string
   variables?: Record<string, string>
   retention_days?: number
 }
@@ -147,6 +240,11 @@ export async function retryTestRun(id: string) {
   return response.data
 }
 
+export async function regenerateReport(id: string) {
+  const response = await api.post(`/runs/${id}/report`)
+  return response.data
+}
+
 // Repos
 export async function getRepos() {
   const response = await api.get('/repos')
@@ -191,7 +289,6 @@ export async function getDashboardStats(): Promise<DashboardStats> {
 
   const now = new Date()
   const last24h = new Date(now.getTime() - 24 * 60 * 60 * 1000)
-  const last7Days = new Date(now.getTime() - 7 * 24 * 60 * 60 * 1000)
 
   // Calculate stats
   const passedRuns = runs.filter((r: { status: string }) => r.status === 'passed').length
@@ -252,6 +349,7 @@ export async function syncAllRepos() {
 // API Keys
 export interface ApiKey {
   id: string
+  project_id?: string
   name: string
   key_prefix: string
   created_at: string
@@ -311,6 +409,7 @@ export async function getSystemConfig(): Promise<SystemConfig> {
 // Custom Steps
 export interface CustomStep {
   id: string
+  project_id?: string
   name: string
   pattern: string
   description?: string
@@ -414,13 +513,17 @@ export async function toggleUserActive(id: string, isActive: boolean): Promise<U
 // Schedules
 export interface Schedule {
   id: string
+  project_id?: string
   name: string
   cron_expression: string
   cron_description: string
   scenario_tags: string[]
   scenario_ids: string[]
-  environment_id: string
-  environment_name: string | null
+  environment_ids: string[]
+  environment_names: string[]
+  // Backwards compatibility
+  environment_id?: string
+  environment_name?: string | null
   browsers: string[]
   enabled: boolean
   created_by: string | null
@@ -436,7 +539,7 @@ export interface ScheduleCreate {
   cron_expression: string
   scenario_tags?: string[]
   scenario_ids?: string[]
-  environment_id: string
+  environment_ids: string[]
   browsers?: string[]
   enabled?: boolean
 }
@@ -446,7 +549,7 @@ export interface ScheduleUpdate {
   cron_expression?: string
   scenario_tags?: string[]
   scenario_ids?: string[]
-  environment_id?: string
+  environment_ids?: string[]
   browsers?: string[]
   enabled?: boolean
 }
@@ -678,4 +781,143 @@ export async function resumeSession(sessionId: string): Promise<{ status: string
  */
 export async function endTestSession(sessionId: string): Promise<void> {
   await api.delete(`/test-session/${sessionId}`)
+}
+
+// =============================================================================
+// Pages (Named URL Mappings)
+// =============================================================================
+
+export interface PageOverride {
+  id: string
+  environment_id: string
+  environment_name: string | null
+  path: string
+  created_at: string
+}
+
+export interface Page {
+  id: string
+  project_id: string
+  name: string
+  path: string
+  description: string | null
+  created_at: string
+  updated_at: string
+  overrides: PageOverride[]
+}
+
+export interface PageCreate {
+  name: string
+  path: string
+  description?: string
+}
+
+export interface PageUpdate {
+  name?: string
+  path?: string
+  description?: string
+}
+
+export interface PageWithUrls {
+  id: string
+  project_id: string
+  name: string
+  path: string
+  description: string | null
+  urls: Record<string, string>  // environment_name -> full_url
+}
+
+export interface PageOverrideCreate {
+  environment_id: string
+  path: string
+}
+
+export async function listPages(): Promise<Page[]> {
+  const response = await api.get('/pages')
+  return response.data
+}
+
+export async function getPage(id: string): Promise<Page> {
+  const response = await api.get(`/pages/${id}`)
+  return response.data
+}
+
+export async function createPage(data: PageCreate): Promise<Page> {
+  const response = await api.post('/pages', data)
+  return response.data
+}
+
+export async function updatePage(id: string, data: PageUpdate): Promise<Page> {
+  const response = await api.put(`/pages/${id}`, data)
+  return response.data
+}
+
+export async function deletePage(id: string): Promise<void> {
+  await api.delete(`/pages/${id}`)
+}
+
+export async function getPageUrls(id: string): Promise<PageWithUrls> {
+  const response = await api.get(`/pages/${id}/urls`)
+  return response.data
+}
+
+export async function createPageOverride(pageId: string, data: PageOverrideCreate): Promise<PageOverride> {
+  const response = await api.post(`/pages/${pageId}/overrides`, data)
+  return response.data
+}
+
+export async function deletePageOverride(pageId: string, overrideId: string): Promise<void> {
+  await api.delete(`/pages/${pageId}/overrides/${overrideId}`)
+}
+
+export async function resolvePageUrl(pageName: string, environmentId: string): Promise<{
+  page_name: string
+  environment_name: string
+  path: string
+  base_url: string
+  full_url: string
+}> {
+  const response = await api.get(`/pages/resolve/${encodeURIComponent(pageName)}`, {
+    params: { environment_id: environmentId }
+  })
+  return response.data
+}
+
+// =============================================================================
+// Gherkin Parser / Step Validation
+// =============================================================================
+
+export interface StepValidation {
+  line_number: number
+  keyword: string
+  text: string
+  full_line: string
+  is_matched: boolean
+  matched_pattern: string | null
+  match_source: 'builtin' | 'custom' | null
+  custom_step_id: string | null
+}
+
+export interface ParseResponse {
+  valid: boolean
+  total_steps: number
+  matched_steps: number
+  unmatched_steps: number
+  steps: StepValidation[]
+  errors: string[]
+}
+
+export async function validateGherkinSteps(content: string): Promise<ParseResponse> {
+  const response = await api.post('/parser/validate', { content })
+  return response.data
+}
+
+export interface BuiltinPattern {
+  pattern: string
+  description: string
+}
+
+export async function getBuiltinPatterns(): Promise<BuiltinPattern[]> {
+  const response = await api.get('/parser/patterns')
+  return response.data
 }

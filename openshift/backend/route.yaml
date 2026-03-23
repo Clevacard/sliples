@@ -9,10 +9,11 @@ metadata:
   annotations:
     haproxy.router.openshift.io/timeout: 120s
 spec:
-  host: api.sliples.apps.example.com
+  host: sliples.agantis.in
+  path: /api
   to:
     kind: Service
-    name: sliples-backend-svc
+    name: backend
     weight: 100
   port:
     targetPort: http

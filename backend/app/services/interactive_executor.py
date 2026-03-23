@@ -7,7 +7,7 @@ import re
 import time
 from dataclasses import dataclass, field
 from datetime import datetime
-from typing import Any, Callable, Optional
+from typing import Any, Callable, Optional, Dict
 from uuid import UUID
 
 from app.config import get_settings
@@ -56,6 +56,9 @@ class InteractiveExecutor:
         browser_type: str = "chromium",
         base_url: str = "",
         headless: bool = False,
+        pages: Optional[dict[str, str]] = None,
+        locale: str = "en-GB",
+        timezone_id: str = "Europe/London",
     ) -> "InteractiveSession":
         """
         Create a new interactive session.
@@ -65,6 +68,9 @@ class InteractiveExecutor:
             browser_type: Browser to use ('chromium', 'firefox', 'webkit')
             base_url: Base URL for the test environment
             headless: Whether to run browser headless (False for interactive)
+            pages: Optional dict of page_name -> path for named page navigation
+            locale: Browser locale (e.g., en-GB, de-DE)
+            timezone_id: IANA timezone (e.g., Europe/London)
 
         Returns:
             InteractiveSession instance
@@ -74,6 +80,9 @@ class InteractiveExecutor:
             browser_type=browser_type,
             base_url=base_url,
             headless=headless,
+            pages=pages,
+            locale=locale,
+            timezone_id=timezone_id,
         )
         await session.start()
         cls._sessions[session_id] = session
@@ -110,11 +119,16 @@ class InteractiveSession:
         browser_type: str = "chromium",
         base_url: str = "",
         headless: bool = False,
+        pages: Optional[dict[str, str]] = None,
+        locale: str = "en-GB",
+        timezone_id: str = "Europe/London",
     ):
         self.session_id = session_id
         self.browser_type = browser_type
         self.base_url = base_url
         self.headless = headless
+        self.locale = locale
+        self.timezone_id = timezone_id
         self.settings = get_settings()
 
         self._playwright = None
@@ -122,7 +136,7 @@ class InteractiveSession:
         self._context = None
         self._page = None
 
-        self.step_registry = GherkinStepRegistry()
+        self.step_registry = GherkinStepRegistry(pages=pages)
         self.step_results: list[dict] = []
         self.logs: list[str] = []
         self.current_step_index = 0
@@ -130,6 +144,11 @@ class InteractiveSession:
 
         self._started_at = None
         self._status = "initializing"
+
+    def set_pages(self, pages: dict[str, str]):
+        """Set pages for named page navigation."""
+        self.step_registry.set_pages(pages)
+        self._log(f"Loaded {len(pages)} page definitions")
 
     def _get_browser_url(self) -> str:
         """Get the WebSocket URL for the browser container."""
@@ -181,6 +200,8 @@ class InteractiveSession:
         self._context = await self._browser.new_context(
             viewport={"width": 1280, "height": 720},
             ignore_https_errors=True,
+            locale=self.locale,
+            timezone_id=self.timezone_id,
         )
 
         self._page = await self._context.new_page()

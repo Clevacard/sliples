@@ -1,6 +1,7 @@
 import { useEffect, useState, useMemo } from 'react'
 import { Link, useNavigate } from 'react-router-dom'
 import { getScenarios, getRepos, createScenario, deleteScenario, syncScenarios } from '../api/client'
+import { useProjectsStore } from '../store/projects'
 
 interface Scenario {
   id: string
@@ -21,8 +22,20 @@ interface Repo {
   branch?: string
 }
 
+// Convert name to a valid filename (lowercase, spaces to hyphens, remove special chars)
+function toFilename(name: string): string {
+  return name
+    .toLowerCase()
+    .trim()
+    .replace(/\s+/g, '-')
+    .replace(/[^a-z0-9-]/g, '')
+    .replace(/-+/g, '-')
+    .replace(/^-|-$/g, '')
+}
+
 export default function Scenarios() {
   const navigate = useNavigate()
+  const { currentProject } = useProjectsStore()
   const [scenarios, setScenarios] = useState<Scenario[]>([])
   const [repos, setRepos] = useState<Repo[]>([])
   const [loading, setLoading] = useState(true)
@@ -31,7 +44,7 @@ export default function Scenarios() {
   const [showCreateModal, setShowCreateModal] = useState(false)
   const [newScenario, setNewScenario] = useState({
     name: '',
-    feature_path: '',
+    filename: '',
     tags: '',
     content: `@smoke
 Feature: New Feature
@@ -45,6 +58,16 @@ Feature: New Feature
 `,
   })
   const [creating, setCreating] = useState(false)
+
+  // Compute the base path for scenarios
+  const scenarioBasePath = currentProject?.slug
+    ? `scenarios/${currentProject.slug}/`
+    : 'scenarios/'
+
+  // Compute full feature path
+  const featurePath = newScenario.filename
+    ? `${scenarioBasePath}${newScenario.filename}${newScenario.filename.endsWith('.feature') ? '' : '.feature'}`
+    : ''
 
   // Filters
   const [searchQuery, setSearchQuery] = useState('')
@@ -128,7 +151,7 @@ Feature: New Feature
   }
 
   const handleCreateScenario = async () => {
-    if (!newScenario.name || !newScenario.feature_path) return
+    if (!newScenario.name || !featurePath) return
     setCreating(true)
     try {
       const tags = newScenario.tags
@@ -137,7 +160,7 @@ Feature: New Feature
         .filter(Boolean)
       const created = await createScenario({
         name: newScenario.name,
-        feature_path: newScenario.feature_path,
+        feature_path: featurePath,
         content: newScenario.content,
         tags,
       })
@@ -145,7 +168,7 @@ Feature: New Feature
       setShowCreateModal(false)
       setNewScenario({
         name: '',
-        feature_path: '',
+        filename: '',
         tags: '',
         content: `@smoke
 Feature: New Feature
@@ -584,7 +607,11 @@ Feature: New Feature
                   className="input w-full"
                   placeholder="e.g., User Login"
                   value={newScenario.name}
-                  onChange={(e) => setNewScenario({ ...newScenario, name: e.target.value })}
+                  onChange={(e) => {
+                    const name = e.target.value
+                    const filename = toFilename(name)
+                    setNewScenario({ ...newScenario, name, filename })
+                  }}
                 />
               </div>
 
@@ -592,13 +619,24 @@ Feature: New Feature
                 <label className="block text-sm font-medium text-gray-400 mb-2">
                   Feature Path *
                 </label>
-                <input
-                  type="text"
-                  className="input w-full"
-                  placeholder="e.g., scenarios/auth/login.feature"
-                  value={newScenario.feature_path}
-                  onChange={(e) => setNewScenario({ ...newScenario, feature_path: e.target.value })}
-                />
+                <div className="flex items-center gap-0">
+                  <span className="px-3 py-2 bg-gray-900 border border-r-0 border-gray-600 rounded-l-lg text-gray-400 text-sm">
+                    {scenarioBasePath}
+                  </span>
+                  <input
+                    type="text"
+                    className="input flex-1 rounded-l-none"
+                    placeholder="filename"
+                    value={newScenario.filename}
+                    onChange={(e) => setNewScenario({ ...newScenario, filename: e.target.value })}
+                  />
+                  <span className="px-3 py-2 bg-gray-900 border border-l-0 border-gray-600 rounded-r-lg text-gray-400 text-sm">
+                    .feature
+                  </span>
+                </div>
+                <p className="text-xs text-gray-500 mt-1">
+                  Full path: {featurePath || '—'}
+                </p>
               </div>
 
               <div>
@@ -636,7 +674,7 @@ Feature: New Feature
               </button>
               <button
                 onClick={handleCreateScenario}
-                disabled={creating || !newScenario.name || !newScenario.feature_path}
+                disabled={creating || !newScenario.name || !newScenario.filename}
                 className="btn btn-primary flex items-center gap-2"
               >
                 {creating ? (

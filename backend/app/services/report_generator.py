@@ -468,8 +468,12 @@ class ReportGenerator:
             # Screenshot link
             screenshot = ""
             if result.screenshot_url:
+                # Construct URL through the screenshots API endpoint
+                screenshot_path = result.screenshot_url
+                if not screenshot_path.startswith('/') and not screenshot_path.startswith('http'):
+                    screenshot_path = f"/api/v1/screenshots/{screenshot_path}"
                 screenshot = (
-                    f'<a href="{self._escape_html(result.screenshot_url)}" '
+                    f'<a href="{self._escape_html(screenshot_path)}" '
                     f'class="screenshot-link" target="_blank">View</a>'
                 )
 
