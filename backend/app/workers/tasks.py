@@ -561,7 +561,7 @@ def cleanup_old_data(self):
 
 
 @celery_app.task(bind=True, max_retries=3)
-def execute_scheduled_run(self, schedule_id: str):
+def execute_scheduled_run(self, schedule_id: str, manual_trigger: bool = False):
     """
     Execute a scheduled test run.
 
@@ -570,6 +570,10 @@ def execute_scheduled_run(self, schedule_id: str):
     2. Creates a new test run
     3. Queues the test execution
     4. Updates the schedule with last/next run info
+
+    Args:
+        schedule_id: The schedule UUID
+        manual_trigger: If True, run even if schedule is disabled (for "Run now" feature)
     """
     from croniter import croniter
     from app.models import Schedule, Environment
@@ -582,7 +586,7 @@ def execute_scheduled_run(self, schedule_id: str):
             logger.error(f"Schedule {schedule_id} not found")
             return {"success": False, "error": "Schedule not found"}
 
-        if not schedule.enabled:
+        if not schedule.enabled and not manual_trigger:
             logger.info(f"Schedule {schedule_id} is disabled, skipping")
             return {"success": False, "error": "Schedule is disabled"}
 

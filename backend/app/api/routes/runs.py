@@ -78,25 +78,33 @@ class TestRunDetail(TestRunResponse):
 
 @router.get("/runs", response_model=list[TestRunResponse])
 async def list_runs(
-    status_filter: Optional[str] = None,
+    status: Optional[str] = Query(None, alias="status"),
     environment_id: Optional[UUID] = None,
     limit: int = 50,
     offset: int = 0,
+    date_from: Optional[datetime] = None,
+    date_to: Optional[datetime] = None,
     db: Session = Depends(get_db),
     auth = Depends(get_api_key_or_user),
     project: Optional[Project] = Depends(verify_project_access),
 ):
-    """List test runs, optionally filtered by project."""
+    """List test runs, optionally filtered by project, status, and date range."""
     query = db.query(TestRun).order_by(TestRun.created_at.desc())
 
     if project:
         query = query.filter(TestRun.project_id == project.id)
 
-    if status_filter:
-        query = query.filter(TestRun.status == status_filter)
+    if status:
+        query = query.filter(TestRun.status == status)
 
     if environment_id:
         query = query.filter(TestRun.environment_id == environment_id)
+
+    if date_from:
+        query = query.filter(TestRun.created_at >= date_from)
+
+    if date_to:
+        query = query.filter(TestRun.created_at <= date_to)
 
     return query.offset(offset).limit(limit).all()
 

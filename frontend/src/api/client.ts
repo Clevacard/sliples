@@ -227,7 +227,13 @@ export async function syncScenarios() {
 }
 
 // Test Runs
-export async function getTestRuns(params?: { status?: string; limit?: number }) {
+export async function getTestRuns(params?: {
+  status?: string
+  limit?: number
+  offset?: number
+  date_from?: string
+  date_to?: string
+}) {
   const response = await api.get('/runs', { params })
   return response.data
 }

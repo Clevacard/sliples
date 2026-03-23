@@ -449,8 +449,8 @@ async def run_schedule_now(
     if not schedule:
         raise HTTPException(status_code=404, detail="Schedule not found")
 
-    # Trigger the task
-    task = execute_scheduled_run.delay(str(schedule_id))
+    # Trigger the task with manual_trigger=True to allow running disabled schedules
+    task = execute_scheduled_run.delay(str(schedule_id), manual_trigger=True)
 
     return {
         "message": "Schedule triggered",
