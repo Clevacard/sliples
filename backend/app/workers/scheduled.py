@@ -52,6 +52,49 @@ def cleanup_orphaned_screenshots():
     return {"status": "not_implemented"}
 
 
+def calculate_next_run_with_timezone(cron_expression: str, timezone_str: str, after: datetime = None) -> datetime:
+    """
+    Calculate the next run time for a cron expression in a specific timezone.
+
+    Args:
+        cron_expression: The cron expression (e.g., "0 0 * * *")
+        timezone_str: The timezone name (e.g., "Europe/London")
+        after: The datetime to calculate from (defaults to now)
+
+    Returns:
+        The next run time in UTC
+    """
+    from croniter import croniter
+    import pytz
+
+    if after is None:
+        after = datetime.utcnow()
+
+    try:
+        tz = pytz.timezone(timezone_str)
+    except pytz.exceptions.UnknownTimeZoneError:
+        tz = pytz.UTC
+
+    # Convert 'after' to the schedule's timezone
+    if after.tzinfo is None:
+        after_utc = pytz.UTC.localize(after)
+    else:
+        after_utc = after
+    after_local = after_utc.astimezone(tz)
+
+    # Calculate next run in the local timezone
+    cron = croniter(cron_expression, after_local)
+    next_local = cron.get_next(datetime)
+
+    # Ensure the result is timezone-aware
+    if next_local.tzinfo is None:
+        next_local = tz.localize(next_local)
+
+    # Convert back to UTC and make naive for storage
+    next_utc = next_local.astimezone(pytz.UTC)
+    return next_utc.replace(tzinfo=None)
+
+
 @celery_app.task
 def check_scheduled_runs():
     """
@@ -61,7 +104,6 @@ def check_scheduled_runs():
     """
     from app.models import Schedule
     from app.workers.tasks import execute_scheduled_run
-    from croniter import croniter
 
     db = SessionLocal()
     try:
@@ -80,10 +122,11 @@ def check_scheduled_runs():
             execute_scheduled_run.delay(str(schedule.id))
             triggered_count += 1
 
-            # Update next_run_at to prevent re-triggering
-            # (execute_scheduled_run will update it properly after execution)
-            cron = croniter(schedule.cron_expression, now)
-            schedule.next_run_at = cron.get_next(datetime)
+            # Update next_run_at using the schedule's timezone
+            timezone = schedule.timezone or "UTC"
+            schedule.next_run_at = calculate_next_run_with_timezone(
+                schedule.cron_expression, timezone, now
+            )
 
         if triggered_count > 0:
             db.commit()

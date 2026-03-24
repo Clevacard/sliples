@@ -21,6 +21,9 @@ class Schedule(Base):
     name = Column(String(100), nullable=False)
     cron_expression = Column(String(100), nullable=False)
 
+    # Timezone for cron evaluation (defaults to UTC)
+    timezone = Column(String(50), default="UTC")
+
     # What to run
     scenario_tags = Column(ARRAY(String), default=[])
     scenario_ids = Column(ARRAY(UUID(as_uuid=True)), default=[])

@@ -138,6 +138,7 @@ def get_cron_description(cron_expression: str) -> str:
 class ScheduleCreate(BaseModel):
     name: str = Field(..., min_length=1, max_length=100)
     cron_expression: str = Field(..., min_length=9, max_length=100)
+    timezone: str = Field(default="UTC", max_length=50)
     scenario_tags: list[str] = Field(default=[])
     scenario_ids: list[UUID] = Field(default=[])
     environment_ids: list[UUID] = Field(..., min_length=1)
@@ -162,6 +163,7 @@ class ScheduleCreate(BaseModel):
 class ScheduleUpdate(BaseModel):
     name: Optional[str] = Field(None, min_length=1, max_length=100)
     cron_expression: Optional[str] = Field(None, min_length=9, max_length=100)
+    timezone: Optional[str] = Field(None, max_length=50)
     scenario_tags: Optional[list[str]] = None
     scenario_ids: Optional[list[UUID]] = None
     environment_ids: Optional[list[UUID]] = None
@@ -193,6 +195,7 @@ class ScheduleResponse(BaseModel):
     name: str
     cron_expression: str
     cron_description: str
+    timezone: str
     scenario_tags: list[str]
     scenario_ids: list[UUID]
     environment_ids: list[UUID]
@@ -225,6 +228,7 @@ def schedule_to_response(schedule: Schedule, db: Session = None) -> ScheduleResp
         name=schedule.name,
         cron_expression=schedule.cron_expression,
         cron_description=get_cron_description(schedule.cron_expression),
+        timezone=schedule.timezone or "UTC",
         scenario_tags=schedule.scenario_tags or [],
         scenario_ids=schedule.scenario_ids or [],
         environment_ids=schedule.environment_ids or [],
@@ -297,13 +301,16 @@ async def create_schedule(
                 detail=f"Scenarios not found: {', '.join(str(m) for m in missing)}"
             )
 
-    # Calculate next run time
-    next_run = calculate_next_run(schedule.cron_expression) if schedule.enabled else None
+    # Calculate next run time with timezone
+    from app.workers.scheduled import calculate_next_run_with_timezone
+    timezone = schedule.timezone or "UTC"
+    next_run = calculate_next_run_with_timezone(schedule.cron_expression, timezone) if schedule.enabled else None
 
     db_schedule = Schedule(
         project_id=project.id if project else None,
         name=schedule.name,
         cron_expression=schedule.cron_expression,
+        timezone=timezone,
         scenario_tags=schedule.scenario_tags,
         scenario_ids=schedule.scenario_ids,
         environment_ids=schedule.environment_ids,
@@ -372,13 +379,16 @@ async def update_schedule(
     for field, value in update_data.items():
         setattr(schedule, field, value)
 
-    # Recalculate next run if cron or enabled changed
+    # Recalculate next run if cron, timezone, or enabled changed
+    from app.workers.scheduled import calculate_next_run_with_timezone
     cron_changed = "cron_expression" in update_data
+    timezone_changed = "timezone" in update_data
     enabled_changed = "enabled" in update_data
 
-    if cron_changed or enabled_changed:
+    if cron_changed or timezone_changed or enabled_changed:
         if schedule.enabled:
-            schedule.next_run_at = calculate_next_run(schedule.cron_expression)
+            timezone = schedule.timezone or "UTC"
+            schedule.next_run_at = calculate_next_run_with_timezone(schedule.cron_expression, timezone)
         else:
             schedule.next_run_at = None
 
