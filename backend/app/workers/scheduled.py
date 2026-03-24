@@ -65,19 +65,21 @@ def calculate_next_run_with_timezone(cron_expression: str, timezone_str: str, af
         The next run time in UTC
     """
     from croniter import croniter
-    import pytz
+    from zoneinfo import ZoneInfo
 
     if after is None:
         after = datetime.utcnow()
 
     try:
-        tz = pytz.timezone(timezone_str)
-    except pytz.exceptions.UnknownTimeZoneError:
-        tz = pytz.UTC
+        tz = ZoneInfo(timezone_str)
+    except Exception:
+        tz = ZoneInfo("UTC")
+
+    utc = ZoneInfo("UTC")
 
     # Convert 'after' to the schedule's timezone
     if after.tzinfo is None:
-        after_utc = pytz.UTC.localize(after)
+        after_utc = after.replace(tzinfo=utc)
     else:
         after_utc = after
     after_local = after_utc.astimezone(tz)
@@ -88,10 +90,10 @@ def calculate_next_run_with_timezone(cron_expression: str, timezone_str: str, af
 
     # Ensure the result is timezone-aware
     if next_local.tzinfo is None:
-        next_local = tz.localize(next_local)
+        next_local = next_local.replace(tzinfo=tz)
 
     # Convert back to UTC and make naive for storage
-    next_utc = next_local.astimezone(pytz.UTC)
+    next_utc = next_local.astimezone(utc)
     return next_utc.replace(tzinfo=None)
 
 
