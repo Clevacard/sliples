@@ -222,6 +222,9 @@ export default function Schedules() {
                       </svg>
                       <span>{schedule.cron_description}</span>
                       <span className="text-gray-500 font-mono text-xs">({schedule.cron_expression})</span>
+                      {schedule.timezone && schedule.timezone !== 'UTC' && (
+                        <span className="text-gray-500 text-xs">• {schedule.timezone}</span>
+                      )}
                     </div>
 
                     {/* Details */}

@@ -535,6 +535,7 @@ export interface Schedule {
   name: string
   cron_expression: string
   cron_description: string
+  timezone: string
   scenario_tags: string[]
   scenario_ids: string[]
   environment_ids: string[]
@@ -555,6 +556,7 @@ export interface Schedule {
 export interface ScheduleCreate {
   name: string
   cron_expression: string
+  timezone?: string
   scenario_tags?: string[]
   scenario_ids?: string[]
   environment_ids: string[]
@@ -565,6 +567,7 @@ export interface ScheduleCreate {
 export interface ScheduleUpdate {
   name?: string
   cron_expression?: string
+  timezone?: string
   scenario_tags?: string[]
   scenario_ids?: string[]
   environment_ids?: string[]

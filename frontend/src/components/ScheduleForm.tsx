@@ -30,12 +30,29 @@ export default function ScheduleForm({
 }: ScheduleFormProps) {
   const [name, setName] = useState('')
   const [cronExpression, setCronExpression] = useState('0 9 * * *')
+  const [timezone, setTimezone] = useState('UTC')
   const [environmentIds, setEnvironmentIds] = useState<string[]>([])
   const [browsers, setBrowsers] = useState<string[]>(['chromium'])
   const [scenarioTags, setScenarioTags] = useState<string[]>([])
   const [scenarioIds, setScenarioIds] = useState<string[]>([])
   const [enabled, setEnabled] = useState(true)
   const [errors, setErrors] = useState<Record<string, string>>({})
+
+  // Common timezones for schedule selection
+  const COMMON_TIMEZONES = [
+    { value: 'UTC', label: 'UTC' },
+    { value: 'Europe/London', label: 'London (GMT/BST)' },
+    { value: 'Europe/Paris', label: 'Paris (CET/CEST)' },
+    { value: 'Europe/Berlin', label: 'Berlin (CET/CEST)' },
+    { value: 'America/New_York', label: 'New York (EST/EDT)' },
+    { value: 'America/Chicago', label: 'Chicago (CST/CDT)' },
+    { value: 'America/Denver', label: 'Denver (MST/MDT)' },
+    { value: 'America/Los_Angeles', label: 'Los Angeles (PST/PDT)' },
+    { value: 'Asia/Tokyo', label: 'Tokyo (JST)' },
+    { value: 'Asia/Shanghai', label: 'Shanghai (CST)' },
+    { value: 'Asia/Singapore', label: 'Singapore (SGT)' },
+    { value: 'Australia/Sydney', label: 'Sydney (AEST/AEDT)' },
+  ]
 
   // Data for selects
   const [environments, setEnvironments] = useState<Environment[]>([])
@@ -91,6 +108,7 @@ export default function ScheduleForm({
     if (schedule) {
       setName(schedule.name)
       setCronExpression(schedule.cron_expression)
+      setTimezone(schedule.timezone || 'UTC')
       // Support both old single environment_id and new environment_ids array
       if (schedule.environment_ids && schedule.environment_ids.length > 0) {
         setEnvironmentIds(schedule.environment_ids)
@@ -111,6 +129,7 @@ export default function ScheduleForm({
     } else {
       setName('')
       setCronExpression('0 9 * * *')
+      setTimezone('UTC')
       setBrowsers(['chromium'])
       setScenarioTags([])
       setScenarioIds([])
@@ -163,6 +182,7 @@ export default function ScheduleForm({
     const data: ScheduleCreate | ScheduleUpdate = {
       name: name.trim(),
       cron_expression: cronExpression,
+      timezone,
       environment_ids: environmentIds,
       browsers,
       scenario_tags: selectionMode === 'tags' ? scenarioTags : [],
@@ -256,6 +276,29 @@ export default function ScheduleForm({
         {errors.cronExpression && (
           <p className="mt-1 text-sm text-red-400">{errors.cronExpression}</p>
         )}
+      </div>
+
+      {/* Timezone */}
+      <div>
+        <label htmlFor="schedule-timezone" className="block text-sm font-medium text-gray-300 mb-1">
+          Timezone
+        </label>
+        <select
+          id="schedule-timezone"
+          value={timezone}
+          onChange={(e) => setTimezone(e.target.value)}
+          disabled={isLoading}
+          className="w-full px-3 py-2 bg-gray-700 border border-gray-600 rounded-lg text-gray-100 focus:outline-none focus:ring-2 focus:ring-primary-500 focus:border-transparent"
+        >
+          {COMMON_TIMEZONES.map((tz) => (
+            <option key={tz.value} value={tz.value}>
+              {tz.label}
+            </option>
+          ))}
+        </select>
+        <p className="mt-1 text-xs text-gray-400">
+          The cron schedule will be evaluated in this timezone
+        </p>
       </div>
 
       {/* Environments */}

@@ -99,9 +99,10 @@ export const useDashboardStore = create<DashboardState>((set) => ({
   runAllTests: async (environment: string) => {
     set({ isRunningAllTests: true, error: null })
     try {
+      // Empty scenario_tags triggers "run all scenarios" in the backend
       await createTestRun({
         environment,
-        scenario_tags: ['@all'],
+        scenario_tags: [],
       })
       // Refresh recent runs after starting
       const runs = await getTestRuns({ limit: 10 })

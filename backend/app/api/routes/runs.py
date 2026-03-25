@@ -363,6 +363,7 @@ async def retry_run(
 
     # Create a new run with the same configuration
     new_run = TestRun(
+        project_id=original_run.project_id,
         scenario_ids=original_run.scenario_ids,
         environment_id=original_run.environment_id,
         status=RunStatus.QUEUED,
