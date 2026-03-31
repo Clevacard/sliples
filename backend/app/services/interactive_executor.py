@@ -377,18 +377,25 @@ class InteractiveSession:
         """Execute custom step code with proper async handling."""
         # Extract function body from decorator-style code
         lines = code.strip().split('\n')
+        import_lines = []
         func_body_lines = []
         in_function = False
         base_indent = None
 
         for line in lines:
-            if line.strip().startswith(('from ', 'import ', '@')):
+            stripped = line.strip()
+            # Collect import lines to execute in the globals context later
+            if stripped.startswith(('import ', 'from ')) and not in_function:
+                import_lines.append(stripped)
                 continue
-            if line.strip().startswith('def '):
+            # Skip decorators
+            if stripped.startswith('@'):
+                continue
+            if stripped.startswith('def '):
                 in_function = True
                 continue
             if in_function:
-                if line.strip():
+                if stripped:
                     if base_indent is None:
                         base_indent = len(line) - len(line.lstrip())
                     if len(line) >= base_indent:
@@ -438,8 +445,19 @@ async def __custom_step__(page, __params__):
 {indented_body}
 '''
 
-        # Execute
+        # Create execution context
         exec_globals = {'__builtins__': __builtins__}
+
+        # Execute import statements individually into globals so the function
+        # body can reference them (e.g. import re, import json).
+        # Imports irrelevant to execution (playwright stubs, pytest_bdd) are
+        # silently skipped — only stdlib/installed modules matter at runtime.
+        for imp in import_lines:
+            try:
+                exec(imp, exec_globals)  # noqa: S102
+            except ImportError:
+                pass
+
         exec(wrapped_code, exec_globals)  # noqa: S102
         await exec_globals['__custom_step__'](self._page, params)
 

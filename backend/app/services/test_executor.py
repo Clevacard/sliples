@@ -667,21 +667,27 @@ class TestExecutor:
         """
         # Try to extract the function body from decorator-style code
         lines = code.strip().split('\n')
+        import_lines = []
         func_body_lines = []
         in_function = False
         base_indent = None
 
         for line in lines:
-            # Skip import lines and decorators
-            if line.strip().startswith(('from ', 'import ', '@')):
+            stripped = line.strip()
+            # Collect import lines to execute in the globals context later
+            if stripped.startswith(('import ', 'from ')) and not in_function:
+                import_lines.append(stripped)
+                continue
+            # Skip decorators
+            if stripped.startswith('@'):
                 continue
             # Look for function definition
-            if line.strip().startswith('def '):
+            if stripped.startswith('def '):
                 in_function = True
                 continue
             # Collect function body
             if in_function:
-                if line.strip():  # Non-empty line
+                if stripped:  # Non-empty line
                     if base_indent is None:
                         base_indent = len(line) - len(line.lstrip())
                     # Dedent to base level
@@ -744,6 +750,16 @@ async def __custom_step__(page, __params__):
         exec_globals = {
             '__builtins__': __builtins__,
         }
+
+        # Execute import statements individually into globals so the function
+        # body can reference them (e.g. import re, import json).
+        # Imports irrelevant to execution (playwright stubs, pytest_bdd) are
+        # silently skipped — only stdlib/installed modules matter at runtime.
+        for imp in import_lines:
+            try:
+                exec(imp, exec_globals)  # noqa: S102
+            except ImportError:
+                pass
 
         # Execute to define the function
         exec(wrapped_code, exec_globals)  # noqa: S102
