@@ -11,7 +11,7 @@ from typing import Any, Callable, Optional, Dict
 from uuid import UUID
 
 from app.config import get_settings
-from app.services.test_executor import GherkinStepRegistry
+from app.services.test_executor import GherkinStepRegistry, resolve_variables
 
 logger = logging.getLogger(__name__)
 
@@ -59,6 +59,7 @@ class InteractiveExecutor:
         pages: Optional[dict[str, str]] = None,
         locale: str = "en-GB",
         timezone_id: str = "Europe/London",
+        variables: Optional[dict[str, str]] = None,
     ) -> "InteractiveSession":
         """
         Create a new interactive session.
@@ -71,6 +72,7 @@ class InteractiveExecutor:
             pages: Optional dict of page_name -> path for named page navigation
             locale: Browser locale (e.g., en-GB, de-DE)
             timezone_id: IANA timezone (e.g., Europe/London)
+            variables: Optional dict of environment variables for {var} substitution
 
         Returns:
             InteractiveSession instance
@@ -83,6 +85,7 @@ class InteractiveExecutor:
             pages=pages,
             locale=locale,
             timezone_id=timezone_id,
+            variables=variables,
         )
         await session.start()
         cls._sessions[session_id] = session
@@ -122,6 +125,7 @@ class InteractiveSession:
         pages: Optional[dict[str, str]] = None,
         locale: str = "en-GB",
         timezone_id: str = "Europe/London",
+        variables: Optional[dict[str, str]] = None,
     ):
         self.session_id = session_id
         self.browser_type = browser_type
@@ -129,6 +133,7 @@ class InteractiveSession:
         self.headless = headless
         self.locale = locale
         self.timezone_id = timezone_id
+        self.variables: dict[str, str] = variables or {}
         self.settings = get_settings()
 
         self._playwright = None
@@ -314,7 +319,8 @@ class InteractiveSession:
             )
 
         step = self.scenario_steps[step_index]
-        step_text = step["text"]
+        # Apply environment variable substitution before matching
+        step_text = resolve_variables(step["text"], self.variables)
         step_full = step["full"]
 
         self._log(f"Executing step {step_index + 1}: {step_full}")

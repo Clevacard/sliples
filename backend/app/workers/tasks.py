@@ -183,6 +183,7 @@ def execute_test_run(self, run_id: str):
                     timezone_id=environment.timezone_id or "Europe/London",
                     custom_steps=custom_steps if custom_steps else None,
                     pages=pages if pages else None,
+                    variables=environment.variables or {},
                     progress_callback=update_progress,
                 )
             )

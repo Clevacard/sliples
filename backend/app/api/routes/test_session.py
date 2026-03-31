@@ -179,6 +179,7 @@ async def start_test_session(
             pages=pages,
             locale=environment.locale or "en-GB",
             timezone_id=environment.timezone_id or "Europe/London",
+            variables=environment.variables or {},
         )
     except Exception as e:
         raise HTTPException(

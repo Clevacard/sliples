@@ -500,6 +500,35 @@ class GherkinStepRegistry:
         await page.keyboard.press(key)
 
 
+def resolve_variables(text: str, variables: dict[str, str]) -> str:
+    """Replace {variable_name} placeholders in step text with environment variable values.
+
+    Only substitutes tokens that are NOT already quoted (i.e. not inside "…"),
+    so literal step parameters like I enter "hello" into "username" are untouched
+    while I enter {username} into "username field" becomes I enter "alice" into "username field".
+
+    Args:
+        text: Step text that may contain {var} tokens
+        variables: Dict of variable_name -> value from the environment
+
+    Returns:
+        Step text with variables substituted
+    """
+    if not variables:
+        return text
+
+    def replacer(match: re.Match) -> str:
+        name = match.group(1)
+        if name in variables:
+            value = str(variables[name])
+            logger.debug(f"Variable substitution: {{{name}}} -> {value!r}")
+            return value
+        # Leave unresolved variables as-is so the step matcher can report them properly
+        return match.group(0)
+
+    return re.sub(r'\{(\w+)\}', replacer, text)
+
+
 class TestExecutor:
     """Executes Gherkin scenarios using Playwright."""
 
@@ -730,6 +759,7 @@ async def __custom_step__(page, __params__):
         base_url: str,
         custom_steps: Optional[dict[str, str]] = None,
         capture_screenshots: bool = True,
+        variables: Optional[dict[str, str]] = None,
     ) -> ScenarioResult:
         """
         Execute a single Gherkin scenario.
@@ -741,6 +771,7 @@ async def __custom_step__(page, __params__):
             base_url: Base URL for the test
             custom_steps: Optional dict of pattern -> Python code for custom steps
             capture_screenshots: Whether to capture screenshots
+            variables: Optional dict of environment variables for {var} substitution
 
         Returns:
             ScenarioResult with step results
@@ -774,6 +805,7 @@ async def __custom_step__(page, __params__):
                     step,
                     custom_steps,
                     capture_screenshots,
+                    variables=variables,
                 )
                 result.steps.append(step_result)
 
@@ -800,9 +832,11 @@ async def __custom_step__(page, __params__):
         step: dict,
         custom_steps: Optional[dict[str, str]],
         capture_screenshots: bool,
+        variables: Optional[dict[str, str]] = None,
     ) -> StepResult:
         """Execute a single step."""
-        step_text = step["text"]
+        # Apply environment variable substitution before matching
+        step_text = resolve_variables(step["text"], variables or {})
         step_full = step["full"]
         start_time = time.time()
 
@@ -900,6 +934,7 @@ async def run_test_execution(
     timezone_id: str = "Europe/London",
     custom_steps: Optional[dict[str, str]] = None,
     pages: Optional[dict[str, str]] = None,
+    variables: Optional[dict[str, str]] = None,
     progress_callback: Optional[Callable[[str], None]] = None,
 ) -> TestExecutionResult:
     """
@@ -912,6 +947,7 @@ async def run_test_execution(
         base_url: Base URL for tests
         custom_steps: Optional custom step definitions
         pages: Optional dict of page_name -> path for named page navigation
+        variables: Optional dict of environment variables for {var} substitution
         progress_callback: Optional callback for progress updates
 
     Returns:
@@ -947,6 +983,7 @@ async def run_test_execution(
                 content=scenario["content"],
                 base_url=base_url,
                 custom_steps=custom_steps,
+                variables=variables,
             )
             result.scenarios.append(scenario_result)
 
