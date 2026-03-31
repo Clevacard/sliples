@@ -408,7 +408,6 @@ class InteractiveSession:
         exec_code = '\n'.join(func_body_lines) if func_body_lines else code
 
         # Convert sync Playwright calls to async
-        async_code_lines = []
         async_methods = [
             '.fill(', '.click(', '.wait_for(', '.type(', '.press(',
             '.check(', '.uncheck(', '.select_option(', '.hover(',
@@ -417,14 +416,18 @@ class InteractiveSession:
             '.text_content(', '.get_attribute(', '.is_visible(',
             '.is_enabled(', '.is_checked(', '.evaluate(',
         ]
+        async_code_lines = []
         for line in exec_code.split('\n'):
             modified_line = line
-            for method in async_methods:
-                if method in modified_line and 'await ' not in modified_line:
-                    stripped = modified_line.lstrip()
-                    indent = modified_line[:len(modified_line) - len(stripped)]
-                    modified_line = indent + 'await ' + stripped
-                    break
+            stripped = modified_line.lstrip()
+            # Never prepend await to blank lines, comments, or lines that
+            # already have it — doing so produces invalid syntax
+            if stripped and not stripped.startswith('#') and 'await ' not in modified_line:
+                for method in async_methods:
+                    if method in modified_line:
+                        indent = modified_line[:len(modified_line) - len(stripped)]
+                        modified_line = indent + 'await ' + stripped
+                        break
             async_code_lines.append(modified_line)
 
         async_exec_code = '\n'.join(async_code_lines)

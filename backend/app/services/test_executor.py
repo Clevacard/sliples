@@ -706,26 +706,26 @@ class TestExecutor:
 
         # Convert sync Playwright calls to async by adding 'await'
         # Common patterns: .fill(), .click(), .wait_for(), .locator(), etc.
+        async_methods = [
+            '.fill(', '.click(', '.wait_for(', '.type(', '.press(',
+            '.check(', '.uncheck(', '.select_option(', '.hover(',
+            '.focus(', '.blur(', '.scroll_into_view_if_needed(',
+            '.screenshot(', '.inner_text(', '.inner_html(',
+            '.text_content(', '.get_attribute(', '.is_visible(',
+            '.is_enabled(', '.is_checked(', '.evaluate(',
+        ]
         async_code_lines = []
         for line in exec_code.split('\n'):
             modified_line = line
-            # Add await before common Playwright async methods
-            # Pattern: something.method() where method is async
-            async_methods = [
-                '.fill(', '.click(', '.wait_for(', '.type(', '.press(',
-                '.check(', '.uncheck(', '.select_option(', '.hover(',
-                '.focus(', '.blur(', '.scroll_into_view_if_needed(',
-                '.screenshot(', '.inner_text(', '.inner_html(',
-                '.text_content(', '.get_attribute(', '.is_visible(',
-                '.is_enabled(', '.is_checked(', '.evaluate(',
-            ]
-            for method in async_methods:
-                if method in modified_line and 'await ' not in modified_line:
-                    # Find where to insert await (before the expression)
-                    stripped = modified_line.lstrip()
-                    indent = modified_line[:len(modified_line) - len(stripped)]
-                    modified_line = indent + 'await ' + stripped
-                    break
+            stripped = modified_line.lstrip()
+            # Never prepend await to blank lines, comments, or lines that
+            # already have it — doing so produces invalid syntax
+            if stripped and not stripped.startswith('#') and 'await ' not in modified_line:
+                for method in async_methods:
+                    if method in modified_line:
+                        indent = modified_line[:len(modified_line) - len(stripped)]
+                        modified_line = indent + 'await ' + stripped
+                        break
             async_code_lines.append(modified_line)
 
         async_exec_code = '\n'.join(async_code_lines)
