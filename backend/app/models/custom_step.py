@@ -20,6 +20,7 @@ class CustomStep(Base):
     repo_id = Column(UUID(as_uuid=True), ForeignKey("scenario_repos.id"), nullable=True)
     name = Column(String(255), nullable=False)
     pattern = Column(String(500), nullable=False)  # Gherkin pattern
+    description = Column(Text, nullable=True)  # Optional human-readable description
     code = Column(Text, nullable=False)  # Python implementation
     committed = Column(Boolean, default=False)
     created_at = Column(DateTime, default=datetime.utcnow)

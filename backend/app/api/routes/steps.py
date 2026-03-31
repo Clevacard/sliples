@@ -1,11 +1,12 @@
 """Custom step definition endpoints."""
 
+from datetime import datetime
 from uuid import UUID
 from typing import Optional
 
 from fastapi import APIRouter, Depends, HTTPException, status
 from sqlalchemy.orm import Session
-from pydantic import BaseModel
+from pydantic import BaseModel, model_validator
 
 from app.database import get_db
 from app.models import CustomStep, ScenarioRepo, Project, ApiKey
@@ -50,11 +51,20 @@ class StepResponse(BaseModel):
     repo_id: Optional[UUID]
     name: str
     pattern: str
+    description: Optional[str] = None
     code: str
+    implementation: str = ""  # Alias for code — populated by validator below
     committed: bool
+    created_at: Optional[datetime] = None
+    updated_at: Optional[datetime] = None
 
-    class Config:
-        from_attributes = True
+    model_config = {"from_attributes": True}
+
+    @model_validator(mode="after")
+    def _sync_implementation(self):
+        """Keep implementation in sync with code for frontend compatibility."""
+        self.implementation = self.code
+        return self
 
 
 @router.get("/steps", response_model=list[StepResponse])
@@ -110,6 +120,7 @@ async def create_custom_step(
         repo_id=step.repo_id,
         name=step.name,
         pattern=step.pattern,
+        description=step.description,
         code=step.get_code(),
     )
     db.add(db_step)
@@ -136,6 +147,8 @@ async def update_custom_step(
         step.name = step_update.name
     if step_update.pattern is not None:
         step.pattern = step_update.pattern
+    if step_update.description is not None:
+        step.description = step_update.description
 
     # Handle code/implementation (frontend sends 'implementation')
     new_code = step_update.get_code()
