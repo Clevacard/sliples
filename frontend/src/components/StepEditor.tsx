@@ -219,6 +219,7 @@ export default function StepEditor({ step, onSave, onCancel, isLoading = false }
         </label>
         <div className={`rounded-lg overflow-hidden border ${errors.implementation ? 'border-red-500' : 'border-gray-600'}`}>
           <Editor
+            key={step?.id ?? 'new'}
             height="300px"
             defaultLanguage="python"
             value={implementation}

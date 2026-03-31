@@ -64,10 +64,14 @@ export default function TestMode() {
   const [executing, setExecuting] = useState(false)
   const [error, setError] = useState<string | null>(null)
 
-  // Form state
-  const [selectedEnvironment, setSelectedEnvironment] = useState<string>('')
-  const [selectedScenario, setSelectedScenario] = useState<string>('')
-  const [selectedBrowser, setSelectedBrowser] = useState<string>('chromium')
+  // Form state – restored from localStorage on mount
+  const STORAGE_KEY = 'testmode_last_selections'
+  const savedSelections = (() => {
+    try { return JSON.parse(localStorage.getItem(STORAGE_KEY) || '{}') } catch { return {} }
+  })()
+  const [selectedEnvironment, setSelectedEnvironment] = useState<string>(savedSelections.environment || '')
+  const [selectedScenario, setSelectedScenario] = useState<string>(savedSelections.scenario || '')
+  const [selectedBrowser, setSelectedBrowser] = useState<string>(savedSelections.browser || 'chromium')
 
   // Modal state
   const [showScreenshotModal, setShowScreenshotModal] = useState(false)
@@ -91,11 +95,12 @@ export default function TestMode() {
         setEnvironments(envs)
         setScenarios(scens)
 
-        // Pre-select from URL params
+        // URL params take priority over localStorage
         const envParam = searchParams.get('environment')
         const scenParam = searchParams.get('scenario')
         if (envParam) setSelectedEnvironment(envParam)
         if (scenParam) setSelectedScenario(scenParam)
+        // If no URL params, localStorage values were already set via useState initialiser
       } catch (err) {
         setError('Failed to load data')
       } finally {
@@ -113,6 +118,16 @@ export default function TestMode() {
       }
     }
   }, [])
+
+  // Persist selections to localStorage whenever they change
+  useEffect(() => {
+    try {
+      localStorage.setItem(
+        STORAGE_KEY,
+        JSON.stringify({ environment: selectedEnvironment, scenario: selectedScenario, browser: selectedBrowser })
+      )
+    } catch { /* ignore quota errors */ }
+  }, [selectedEnvironment, selectedScenario, selectedBrowser])
 
   // Start polling when session is active
   useEffect(() => {
