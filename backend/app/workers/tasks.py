@@ -575,7 +575,6 @@ def execute_scheduled_run(self, schedule_id: str, manual_trigger: bool = False):
         schedule_id: The schedule UUID
         manual_trigger: If True, run even if schedule is disabled (for "Run now" feature)
     """
-    from croniter import croniter
     from app.models import Schedule, Environment
 
     db = SessionLocal()
@@ -630,6 +629,7 @@ def execute_scheduled_run(self, schedule_id: str, manual_trigger: bool = False):
             for browser in browsers:
                 # Create a new test run
                 run = TestRun(
+                    project_id=schedule.project_id,
                     scenario_ids=scenario_ids,
                     environment_id=environment.id,
                     status=RunStatus.QUEUED,
@@ -642,19 +642,23 @@ def execute_scheduled_run(self, schedule_id: str, manual_trigger: bool = False):
 
                 run_ids.append(str(run.id))
 
-                # Queue the test execution
-                execute_test_run.delay(str(run.id))
-
         # Update schedule tracking
         now = datetime.utcnow()
         schedule.last_run_at = now
         schedule.last_run_id = UUID(run_ids[0]) if run_ids else None
 
-        # Calculate next run time
-        cron = croniter(schedule.cron_expression, now)
-        schedule.next_run_at = cron.get_next(datetime)
+        # Calculate next run time (timezone-aware)
+        from app.workers.scheduled import calculate_next_run_with_timezone
+        timezone = schedule.timezone or "UTC"
+        schedule.next_run_at = calculate_next_run_with_timezone(schedule.cron_expression, timezone, now)
 
+        # Commit first so all TestRun rows are visible to other DB connections
+        # before dispatching Celery tasks — avoids "Test run not found" race condition
         db.commit()
+
+        # Queue the test executions only after the transaction is committed
+        for run_id in run_ids:
+            execute_test_run.delay(run_id)
 
         logger.info(
             f"Scheduled run {schedule.name} created {len(run_ids)} test run(s): {run_ids}"
