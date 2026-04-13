@@ -11,6 +11,7 @@ from app.models.user import User, UserRole
 from app.models.schedule import Schedule
 from app.models.test_session import TestSession, SessionStatus
 from app.models.page import Page, PageEnvironmentOverride
+from app.models.recording import RecordingSession, RecordedEvent, RecordingStatus
 
 __all__ = [
     "Base",
@@ -34,4 +35,7 @@ __all__ = [
     "SessionStatus",
     "Page",
     "PageEnvironmentOverride",
+    "RecordingSession",
+    "RecordedEvent",
+    "RecordingStatus",
 ]

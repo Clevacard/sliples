@@ -1,0 +1,38 @@
+# Dependencies
+node_modules/
+__pycache__/
+*.pyc
+.venv/
+venv/
+
+# Build outputs
+dist/
+build/
+*.egg-info/
+
+# Test results and coverage
+test-results/
+coverage/
+htmlcov/
+.coverage
+*.lcov
+junit.xml
+pytest_cache/
+.pytest_cache/
+
+# IDE and editor
+.idea/
+.vscode/
+*.swp
+*.swo
+
+# Logs and temp files
+*.log
+tmp/
+.tmp/
+
+# Generated documentation
+CODEBASE_ANALYSIS.md
+CODEBASE_FINDINGS.txt
+EXPLORATION_SUMMARY.md
+README_CODEBASE_DOCS.md
