@@ -2,7 +2,7 @@ apiVersion: v1
 kind: ConfigMap
 metadata:
   name: sliples-frontend-nginx-config
-  namespace: sliples
+  namespace: slipless
   labels:
     app.kubernetes.io/name: sliples
     app.kubernetes.io/component: frontend
@@ -26,6 +26,7 @@ data:
         add_header X-Content-Type-Options "nosniff" always;
         add_header X-XSS-Protection "1; mode=block" always;
         add_header Referrer-Policy "strict-origin-when-cross-origin" always;
+        add_header Content-Security-Policy "default-src 'self'; script-src 'self' 'unsafe-inline' https://sliples.agantis.in/; connect-src 'self' https://sliples.agantis.in/; style-src 'self' 'unsafe-inline'; img-src 'self' data: https:; font-src 'self' data:;" always;
 
         # API proxy to backend
         location /api/ {
