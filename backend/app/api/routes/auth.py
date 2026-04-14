@@ -13,7 +13,7 @@ from sqlalchemy.orm import Session
 
 from app.database import get_db
 from app.models import ApiKey, User, UserRole, Project
-from app.api.deps import get_api_key, verify_project_access, get_validated_api_key, can_write_to_project
+from app.api.deps import get_api_key, verify_project_access, get_validated_api_key, can_write_to_project, get_api_key_or_user
 from app.config import get_settings
 from app.services.google_auth import (
     get_authorization_url,
@@ -86,9 +86,10 @@ def hash_api_key(key: str) -> str:
 
 @router.post("/auth/keys", response_model=ApiKeyCreatedResponse, status_code=status.HTTP_201_CREATED)
 async def create_api_key(
+    request: Request,
     key_data: ApiKeyCreate,
     db: Session = Depends(get_db),
-    _api_key: str = Depends(get_api_key),  # Require authentication
+    _auth = Depends(get_api_key_or_user),  # Accept API key or JWT
     project: Optional[Project] = Depends(verify_project_access),
     validated_key: Optional[ApiKey] = Depends(get_validated_api_key),
 ):
@@ -99,7 +100,7 @@ async def create_api_key(
     Only the hash is stored in the database.
     """
     # Check write permissions (need at least member role to create API keys)
-    if not can_write_to_project(db, _api_key, project, validated_key):
+    if not can_write_to_project(db, _auth, project, validated_key):
         raise HTTPException(
             status_code=status.HTTP_403_FORBIDDEN,
             detail="You don't have permission to create API keys in this project",
@@ -152,8 +153,9 @@ async def create_api_key(
 
 @router.get("/auth/keys", response_model=list[ApiKeyResponse])
 async def list_api_keys(
+    request: Request,
     db: Session = Depends(get_db),
-    _api_key: str = Depends(get_api_key),
+    _auth = Depends(get_api_key_or_user),
     project: Optional[Project] = Depends(verify_project_access),
 ):
     """
@@ -182,9 +184,10 @@ async def list_api_keys(
 
 @router.get("/auth/keys/{key_id}", response_model=ApiKeyResponse)
 async def get_api_key_by_id(
+    request: Request,
     key_id: UUID,
     db: Session = Depends(get_db),
-    _api_key: str = Depends(get_api_key),
+    _auth = Depends(get_api_key_or_user),
 ):
     """Get a specific API key by ID (masked)."""
     key = db.query(ApiKey).filter(
@@ -212,9 +215,10 @@ async def get_api_key_by_id(
 
 @router.delete("/auth/keys/{key_id}", status_code=status.HTTP_204_NO_CONTENT)
 async def revoke_api_key(
+    request: Request,
     key_id: UUID,
     db: Session = Depends(get_db),
-    _api_key: str = Depends(get_api_key),
+    _auth = Depends(get_api_key_or_user),
 ):
     """
     Revoke an API key.
