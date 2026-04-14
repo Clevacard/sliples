@@ -4,9 +4,36 @@ The Sliples Recorder captures UI interactions from websites and converts them in
 
 ## Quick Start
 
-### Option 1: Browser Console (Quickest)
+### Option 1: Browser Console via Bookmarklet (Recommended)
 
-Open your website in a browser and paste this into the DevTools console:
+**If CSP allows script tags (no fetch blocking):**
+
+Create a browser bookmarklet and click it on your website:
+
+```javascript
+javascript:(function(){
+  const script = document.createElement('script');
+  script.src = 'https://sliples.agantis.in/sliples-recorder.js';
+  document.head.appendChild(script);
+  script.onload = () => {
+    const apiKey = prompt('Enter API Key:');
+    if (apiKey) {
+      window.SliplesRecorder.configure({ apiKey });
+      window.SliplesRecorder.start(prompt('Recording name:') || 'Test');
+    }
+  };
+})();
+```
+
+**If website has strict CSP (fetch/eval blocked):**
+
+1. Download `https://sliples.agantis.in/sliples-recorder.js` locally
+2. Host it on your own domain or server
+3. Replace the URL in the bookmarklet with your local URL
+
+This avoids CSP violations since it loads from your own domain.
+
+**Console method (if neither CSP blocks):**
 
 ```javascript
 // Load the recorder
@@ -23,47 +50,67 @@ SliplesRecorder.start('My Test Recording');
 SliplesRecorder.stop();
 ```
 
-That's it! The recording is now available in your Sliples project.
+Note: If you see errors in console from "newrelic.js", that's just the browser's error reporting. The snippet still loads. If fetch fails with CSP error, use the bookmarklet or local approach above.
 
-### Option 2: Inject Script Tag
+### Option 2: Direct Script Tag (For Your Own Website)
 
-Add this to your website's HTML (or any website via a bookmarklet/extension):
+If you control the website code, add to your HTML:
 
 ```html
+<script src="https://sliples.agantis.in/sliples-recorder.js"></script>
 <script>
-  // Configure and load recorder
-  window.sliplesConfig = {
+  // Configure recorder
+  SliplesRecorder.configure({
     apiKey: 'YOUR_API_KEY',
     endpoint: 'https://sliples.agantis.in/api/v1',
     projectId: 'YOUR_PROJECT_ID' // optional
-  };
+  });
 </script>
-<script src="https://sliples.agantis.in/sliples-recorder.js"></script>
 ```
 
 Then in the console:
 
 ```javascript
-SliplesRecorder.configure(window.sliplesConfig);
 SliplesRecorder.start('Login Test');
-// ... interact ...
+// ... interact with page ...
 SliplesRecorder.stop();
 ```
 
-### Option 3: Bookmarklet
+**For local development or testing environments:**
 
-Create a bookmark with this URL to quickly enable recording on any website:
+Download the snippet locally and host on your own domain to avoid CSP issues:
 
-```javascript
-javascript:(function(){
-  const apiKey = prompt('Enter Sliples API Key:');
-  if (!apiKey) return;
-  fetch('https://sliples.agantis.in/api/v1/recorder/snippet.js?api_key=' + apiKey)
-    .then(r => r.text())
-    .then(eval)
-    .then(() => SliplesRecorder.start(prompt('Recording name (optional):') || 'Test'));
-})();
+```html
+<script src="/js/sliples-recorder.js"></script>
+<!-- or from your local server -->
 ```
+
+### Option 3: Local Development Setup
+
+For testing on localhost or internal environments:
+
+1. Download the snippet:
+   ```bash
+   wget https://sliples.agantis.in/sliples-recorder.js -O ./public/sliples-recorder.js
+   ```
+
+2. Add to your test HTML:
+   ```html
+   <script src="/sliples-recorder.js"></script>
+   <script>
+     SliplesRecorder.configure({
+       apiKey: 'YOUR_API_KEY',
+       endpoint: 'https://sliples.agantis.in/api/v1'
+     });
+   </script>
+   ```
+
+3. Start recording from console:
+   ```javascript
+   SliplesRecorder.start('My Test');
+   ```
+
+This avoids all CSP issues since everything is served from your own server.
 
 ## Configuration
 
@@ -216,6 +263,39 @@ SliplesRecorder.start('Staging Test');
 ```
 
 ## Troubleshooting
+
+### CSP (Content Security Policy) Blocks Recording
+
+**Error:** `Fetch API cannot load ... Refused to connect because it violates the document's Content Security Policy`
+
+**Why:** The website you're recording has strict CSP that blocks external script loads or fetches.
+
+**Solutions:**
+
+1. **Use a bookmarklet with local file** (Best for external websites):
+   - Download `https://sliples.agantis.in/sliples-recorder.js` 
+   - Host it locally on your own domain
+   - Use that URL in the bookmarklet instead
+
+2. **Add Sliples to CSP whitelist** (For testing environments):
+   ```html
+   <meta http-equiv="Content-Security-Policy" content="
+     script-src 'self' https://sliples.agantis.in/;
+     connect-src 'self' https://sliples.agantis.in/
+   ">
+   ```
+
+3. **Local development** (Recommended for development):
+   - Include the snippet from your own server
+   - No CSP issues, faster loading
+
+### NewRelic Script Warning in Console
+
+**Error:** `newrelic.js:1504 Fetch API cannot load ...`
+
+**Why:** This is just how the browser reports the error location—the website has NewRelic monitoring, and the error surfaces through it. Not actually a NewRelic problem.
+
+**Fix:** Use one of the CSP solutions above to prevent the fetch from being blocked in the first place.
 
 ### "Invalid API Key" Error
 
