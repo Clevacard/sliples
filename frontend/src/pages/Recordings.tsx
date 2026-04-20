@@ -12,7 +12,7 @@ export default function Recordings() {
 
   useEffect(() => {
     fetchSessions()
-  }, [fetchSessions])
+  }, [])
 
   const filteredSessions = useMemo(() => {
     return sessions.filter((session) => {
