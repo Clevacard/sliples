@@ -62,22 +62,23 @@ app = FastAPI(
     lifespan=lifespan,
 )
 
+# CORS middleware - for all endpoints
+# When using wildcard origins, set allow_credentials to False (CORS spec requirement)
+cors_origins = settings.cors_origins
+allow_credentials = cors_origins != ["*"]
+app.add_middleware(
+    CORSMiddleware,
+    allow_origins=cors_origins,
+    allow_credentials=allow_credentials,
+    allow_methods=["*"],
+    allow_headers=["*"],
+    expose_headers=["*"],
+)
+
 # Custom CORS middleware for public endpoints like recorder snippet
 # Must be added LAST (runs first - LIFO order)
+# This ensures wildcard origins work properly for all methods
 app.add_middleware(PublicCORSMiddleware)
-
-# CORS middleware - for authenticated endpoints
-# Only use credentials if not using wildcard origins
-cors_origins = settings.cors_origins
-if cors_origins != ["*"]:
-    app.add_middleware(
-        CORSMiddleware,
-        allow_origins=cors_origins,
-        allow_credentials=True,
-        allow_methods=["*"],
-        allow_headers=["*"],
-        expose_headers=["*"],
-    )
 
 # Include routers
 app.include_router(projects.router, prefix="/api/v1", tags=["Projects"])
