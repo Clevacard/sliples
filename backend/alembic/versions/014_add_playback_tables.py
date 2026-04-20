@@ -10,7 +10,7 @@ from sqlalchemy.dialects import postgresql
 
 
 revision = '014_add_playback_tables'
-down_revision = '013_add_event_annotations'
+down_revision = '013'
 branch_labels = None
 depends_on = None
 
