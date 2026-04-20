@@ -436,6 +436,19 @@ Mark for screenshots at:
 5. Check that API key in the code matches what you generated
 6. Try a fresh reload with Ctrl+Shift+R (cache bust)
 
+### Content Security Policy (CSP) Violation
+
+**Problem:** Error in console: "Fetch API cannot load... violates the document's Content Security Policy"
+
+**Solutions:**
+1. The website has strict security policies blocking external scripts
+2. Ask your website admin to add these to the CSP headers:
+   - `script-src: 'self' https://sliples.agantis.in`
+   - `connect-src: 'self' https://sliples.agantis.in`
+3. Try recording in an incognito/private browser window
+4. For development/testing, temporarily disable CSP
+5. Contact your Sliples administrator for alternative embedding methods
+
 ### Can't Stop Recording
 
 **Problem:** `SliplesRecorder.stop()` command doesn't work

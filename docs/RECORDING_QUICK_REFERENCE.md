@@ -102,6 +102,7 @@ console.log(window.__sliplesSessionId);
 | Can't find my recording | Refresh Recordings page, check project selector |
 | Events look wrong | Try recording again more slowly |
 | Snippet code won't load | Check CSP headers, try incognito window |
+| **CSP violation error** | **Add sliples.agantis.in to website's CSP headers** |
 | Can't copy the API key | Scroll in the code block, use Copy button |
 
 ---
