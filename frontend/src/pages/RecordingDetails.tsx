@@ -41,9 +41,26 @@ export default function RecordingDetails() {
       setPlaybackRuns(runs)
       if (envs.length > 0 && !selectedEnvId) {
         setSelectedEnvId(envs[0].id)
+        // Set default browser from first environment's config
+        if (envs[0].browser_configs?.length > 0) {
+          setSelectedBrowser(envs[0].browser_configs[0].browser)
+        }
       }
     } catch (e) {
       console.error('Failed to load playback data:', e)
+    }
+  }
+
+  // Get available browsers for selected environment
+  const selectedEnv = environments.find((e) => e.id === selectedEnvId)
+  const availableBrowsers = selectedEnv?.browser_configs || []
+
+  // Update browser when environment changes
+  const handleEnvChange = (envId: string) => {
+    setSelectedEnvId(envId)
+    const env = environments.find((e) => e.id === envId)
+    if (env && env.browser_configs && env.browser_configs.length > 0) {
+      setSelectedBrowser(env.browser_configs[0].browser)
     }
   }
 
@@ -450,7 +467,7 @@ export default function RecordingDetails() {
                 <select
                   className="input w-full"
                   value={selectedEnvId}
-                  onChange={(e) => setSelectedEnvId(e.target.value)}
+                  onChange={(e) => handleEnvChange(e.target.value)}
                 >
                   {environments.map((env) => (
                     <option key={env.id} value={env.id}>
@@ -466,10 +483,23 @@ export default function RecordingDetails() {
                   className="input w-full"
                   value={selectedBrowser}
                   onChange={(e) => setSelectedBrowser(e.target.value)}
+                  disabled={availableBrowsers.length === 0}
                 >
-                  <option value="chrome">Chrome</option>
-                  <option value="firefox">Firefox</option>
+                  {availableBrowsers.length > 0 ? (
+                    availableBrowsers.map((bc) => (
+                      <option key={bc.id} value={bc.browser}>
+                        {bc.browser.charAt(0).toUpperCase() + bc.browser.slice(1)}
+                      </option>
+                    ))
+                  ) : (
+                    <option value="">No browsers configured</option>
+                  )}
                 </select>
+                {availableBrowsers.length === 0 && (
+                  <p className="text-xs text-red-400 mt-1">
+                    Add browser configs in Environment settings
+                  </p>
+                )}
               </div>
 
               <div className="bg-gray-700/30 rounded p-3 text-sm">

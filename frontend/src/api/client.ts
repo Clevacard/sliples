@@ -139,6 +139,14 @@ export async function transferProjectOwnership(projectId: string, newOwnerUserId
 }
 
 // Environments
+export interface BrowserConfig {
+  id: string
+  environment_id: string
+  browser: string
+  version: string
+  channel: string
+}
+
 export interface Environment {
   id: string
   project_id?: string
@@ -149,6 +157,7 @@ export interface Environment {
   credentials_env?: string
   variables: Record<string, string>
   retention_days: number
+  browser_configs: BrowserConfig[]
   created_at?: string
   updated_at?: string
 }
