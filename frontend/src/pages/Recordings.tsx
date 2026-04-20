@@ -3,8 +3,6 @@ import { Link } from 'react-router-dom'
 import { useRecordingsStore } from '../store/recordings'
 
 export default function Recordings() {
-  const navigate = useNavigate()
-  const { currentProject } = useProjectsStore()
   const { sessions, isLoading, error, fetchSessions, deleteSession } = useRecordingsStore()
 
   const [searchQuery, setSearchQuery] = useState('')
