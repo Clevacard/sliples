@@ -1,6 +1,7 @@
 import { useEffect, useState, useMemo } from 'react'
 import { Link } from 'react-router-dom'
 import { useRecordingsStore } from '../store/recordings'
+import StartRecordingModal from '../components/StartRecordingModal'
 
 export default function Recordings() {
   const { sessions, isLoading, error, fetchSessions, deleteSession } = useRecordingsStore()
@@ -9,6 +10,7 @@ export default function Recordings() {
   const [statusFilter, setStatusFilter] = useState('')
   const [deleting, setDeleting] = useState<string | null>(null)
   const [showDeleteConfirm, setShowDeleteConfirm] = useState<string | null>(null)
+  const [showStartModal, setShowStartModal] = useState(false)
 
   useEffect(() => {
     fetchSessions()
@@ -72,9 +74,17 @@ export default function Recordings() {
   return (
     <div className="space-y-6">
       {/* Header */}
-      <div>
-        <h1 className="text-3xl font-bold text-white mb-2">Recordings</h1>
-        <p className="text-gray-400">Review and annotate UI recordings for conversion to test scenarios</p>
+      <div className="flex items-start justify-between">
+        <div>
+          <h1 className="text-3xl font-bold text-white mb-2">Recordings</h1>
+          <p className="text-gray-400">Review and annotate UI recordings for conversion to test scenarios</p>
+        </div>
+        <button
+          onClick={() => setShowStartModal(true)}
+          className="btn btn-primary"
+        >
+          + Start Recording
+        </button>
       </div>
 
       {/* Filter Card */}
@@ -190,6 +200,13 @@ export default function Recordings() {
           </div>
         </div>
       )}
+
+      {/* Start Recording Modal */}
+      <StartRecordingModal
+        isOpen={showStartModal}
+        onClose={() => setShowStartModal(false)}
+        onRecordingStarted={() => setShowStartModal(false)}
+      />
     </div>
   )
 }
