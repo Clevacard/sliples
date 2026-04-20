@@ -11,7 +11,7 @@ from sqlalchemy.orm import Session
 
 from app.database import get_db
 from app.models import RecordingSession, RecordedEvent, RecordingStatus, Project
-from app.api.deps import get_api_key, verify_project_access, get_validated_api_key
+from app.api.deps import get_api_key, verify_project_access, get_validated_api_key, get_api_key_or_user
 
 
 router = APIRouter()
@@ -152,7 +152,7 @@ class EventMetadataUpdate(BaseModel):
 async def start_recording(
     request: RecordingStartRequest,
     db: Session = Depends(get_db),
-    _api_key: str = Depends(get_api_key),
+    _auth = Depends(get_api_key_or_user),
     project: Optional[Project] = Depends(verify_project_access),
 ):
     """
@@ -185,7 +185,7 @@ async def record_events(
     session_id: UUID,
     request: EventsBatchRequest,
     db: Session = Depends(get_db),
-    _api_key: str = Depends(get_api_key),
+    _auth = Depends(get_api_key_or_user),
 ):
     """
     Record a batch of UI events for a session.
@@ -234,7 +234,7 @@ async def record_events(
 async def stop_recording(
     session_id: UUID,
     db: Session = Depends(get_db),
-    _api_key: str = Depends(get_api_key),
+    _auth = Depends(get_api_key_or_user),
 ):
     """Stop a recording session."""
     session = db.query(RecordingSession).filter(RecordingSession.id == session_id).first()
@@ -266,7 +266,7 @@ async def stop_recording(
 @router.get("/recorder/sessions", response_model=list[RecordingSessionResponse])
 async def list_recordings(
     db: Session = Depends(get_db),
-    _api_key: str = Depends(get_api_key),
+    _auth = Depends(get_api_key_or_user),
     project: Optional[Project] = Depends(verify_project_access),
 ):
     """List all recording sessions, optionally filtered by project."""
@@ -299,7 +299,7 @@ async def list_recordings(
 async def get_recording(
     session_id: UUID,
     db: Session = Depends(get_db),
-    _api_key: str = Depends(get_api_key),
+    _auth = Depends(get_api_key_or_user),
 ):
     """Get a recording session by ID."""
     session = db.query(RecordingSession).filter(RecordingSession.id == session_id).first()
@@ -327,7 +327,7 @@ async def get_recording(
 async def get_recording_events(
     session_id: UUID,
     db: Session = Depends(get_db),
-    _api_key: str = Depends(get_api_key),
+    _auth = Depends(get_api_key_or_user),
 ):
     """Get all events for a recording session."""
     session = db.query(RecordingSession).filter(RecordingSession.id == session_id).first()
@@ -371,7 +371,7 @@ async def update_event_metadata(
     event_id: UUID,
     data: EventMetadataUpdate,
     db: Session = Depends(get_db),
-    _api_key: str = Depends(get_api_key),
+    _auth = Depends(get_api_key_or_user),
 ):
     """Update event annotations (label, screenshot flag, parameters, notes)."""
     session = db.query(RecordingSession).filter(RecordingSession.id == session_id).first()
@@ -426,7 +426,7 @@ async def update_event_metadata(
 async def delete_recording(
     session_id: UUID,
     db: Session = Depends(get_db),
-    _api_key: str = Depends(get_api_key),
+    _auth = Depends(get_api_key_or_user),
 ):
     """Delete a recording session and all its events."""
     session = db.query(RecordingSession).filter(RecordingSession.id == session_id).first()
