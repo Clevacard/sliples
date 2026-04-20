@@ -148,8 +148,8 @@ export default function StartRecordingModal({
     onClose()
   }
 
-  const copyToClipboard = () => {
-    navigator.clipboard.writeText(snippetCode)
+  const copyToClipboard = (text: string) => {
+    navigator.clipboard.writeText(text)
   }
 
   return (
@@ -188,9 +188,22 @@ export default function StartRecordingModal({
                   </button>
                 </>
               ) : (
-                <div className="bg-green-900/20 border border-green-700 rounded p-3">
-                  <p className="text-green-200 text-sm mb-2">✓ API Key generated successfully</p>
-                  <p className="text-xs text-gray-400">Key prefix: {generatedKey.key_prefix}...{generatedKey.key_prefix}</p>
+                <div className="space-y-2">
+                  <div className="bg-green-900/20 border border-green-700 rounded p-3">
+                    <p className="text-green-200 text-sm mb-1">✓ API Key generated successfully</p>
+                    <p className="text-xs text-gray-400">Save this key securely. You won't see it again.</p>
+                  </div>
+                  <div className="bg-gray-900 border border-gray-700 rounded p-3 relative">
+                    <pre className="text-xs text-gray-300 font-mono break-all">
+                      {generatedKey.key}
+                    </pre>
+                    <button
+                      onClick={() => copyToClipboard(generatedKey.key)}
+                      className="absolute top-2 right-2 btn btn-sm bg-blue-600 hover:bg-blue-700 text-white text-xs"
+                    >
+                      Copy
+                    </button>
+                  </div>
                 </div>
               )}
             </div>
@@ -255,7 +268,7 @@ export default function StartRecordingModal({
                   {snippetCode}
                 </pre>
                 <button
-                  onClick={copyToClipboard}
+                  onClick={() => copyToClipboard(snippetCode)}
                   className="absolute top-2 right-2 btn btn-sm bg-blue-600 hover:bg-blue-700 text-white text-xs"
                 >
                   Copy
