@@ -10,7 +10,7 @@ from pydantic import BaseModel, Field
 from sqlalchemy.orm import Session
 
 from app.database import get_db
-from app.models import RecordingSession, RecordedEvent, RecordingStatus, Project
+from app.models import RecordingSession, RecordedEvent, RecordingStatus, Project, ApiKey
 from app.api.deps import get_api_key, verify_project_access, get_validated_api_key, get_api_key_or_user
 
 
@@ -153,15 +153,23 @@ async def start_recording(
     request: RecordingStartRequest,
     db: Session = Depends(get_db),
     _auth = Depends(get_api_key_or_user),
-    project: Optional[Project] = Depends(verify_project_access),
+    api_key: Optional[ApiKey] = Depends(get_validated_api_key),
 ):
     """
     Start a new recording session.
 
     Returns a session_id that should be used for all subsequent event submissions.
+    The session is automatically associated with the API key's project.
     """
+    project_id = api_key.project_id if api_key else None
+    if not project_id:
+        raise HTTPException(
+            status_code=status.HTTP_400_BAD_REQUEST,
+            detail="API key must be scoped to a project to create recording sessions",
+        )
+
     session = RecordingSession(
-        project_id=project.id if project else None,
+        project_id=project_id,
         name=request.name,
         url=request.url,
         user_agent=request.user_agent,
@@ -773,16 +781,21 @@ async def get_recorder_snippet(
     return snippet
 
 
+@router.options("/recorder/sessions")
+@router.options("/recorder/sessions/{session_id}")
+@router.options("/recorder/sessions/{session_id}/events")
+@router.options("/recorder/sessions/{session_id}/events/{event_id}")
+@router.options("/recorder/sessions/{session_id}/stop")
 @router.options("/recorder/snippet.js")
-async def options_recorder_snippet(response: Response = None):
+async def options_recorder_endpoints(response: Response = None):
     """
-    Handle CORS preflight requests for the snippet endpoint.
+    Handle CORS preflight requests for all recorder endpoints.
 
-    This allows browsers to make cross-origin requests to load the snippet.
+    This allows browsers to make cross-origin requests to recorder endpoints.
     """
     if response:
         response.headers["Access-Control-Allow-Origin"] = "*"
-        response.headers["Access-Control-Allow-Methods"] = "GET, OPTIONS"
-        response.headers["Access-Control-Allow-Headers"] = "Content-Type"
+        response.headers["Access-Control-Allow-Methods"] = "GET, POST, PATCH, DELETE, OPTIONS"
+        response.headers["Access-Control-Allow-Headers"] = "Content-Type, X-API-Key"
         response.headers["Access-Control-Max-Age"] = "86400"
     return {"status": "ok"}
