@@ -28,7 +28,7 @@ export const useRecordingsStore = create<RecordingsState>()((set) => ({
   sessions: [],
   currentSession: null,
   events: [],
-  isLoading: false,
+  isLoading: true,
   error: null,
 
   fetchSessions: async () => {
