@@ -149,7 +149,6 @@ export default function EditEventModal({ event, onClose }: EditEventModalProps) 
             )}
           </div>
         </div>
-      </div>
 
         {/* Footer */}
         <ModalFooter>
