@@ -2,26 +2,30 @@
 
 ## Overview
 
-The Sliples recorder snippet is served from `https://sliples.agantis.in/api/v1/recorder/snippet.js` and is **publicly accessible** without authentication. The endpoint supports CORS (Cross-Origin Resource Sharing) to allow loading from any website.
+The Sliples recorder snippet is served from `https://sliples.agantis.in/api/v1/recorder/snippet.js` and is **publicly accessible** without authentication. The endpoint fully supports CORS (Cross-Origin Resource Sharing) and returns proper CORS headers for any origin.
 
-If your website still has strict Content Security Policy (CSP) headers, you may need to add Sliples to your whitelist for optimal compatibility.
+The endpoint is configured to accept requests from any website without CSP violations. Browsers can now load the snippet directly.
 
-## Error Messages
+## Status
 
-You may see errors like:
+✅ **CORS is now fully configured on the snippet endpoint.**
+
+The recorder snippet endpoint returns proper `Access-Control-Allow-Origin` headers for any origin, allowing it to be loaded without CSP violations.
+
+### Legacy: CSP Errors (Resolved)
+
+If you previously saw errors like:
 
 ```
 Refused to connect because it violates the document's Content Security Policy
 Fetch API cannot load https://sliples.agantis.in/api/v1/recorder/snippet.js
 ```
 
-This means the website's CSP headers don't allow loading scripts from the Sliples domain. The snippet endpoint is publicly accessible, but your CSP policy is blocking cross-origin requests.
+These should now be resolved thanks to proper CORS header configuration.
 
-## Solution: Update CSP Headers
+### Optional: Add Sliples to CSP Whitelist (Belt-and-Suspenders)
 
-### Required CSP Directives
-
-Add `https://sliples.agantis.in` to your CSP headers:
+You can optionally add `https://sliples.agantis.in` to your CSP headers for additional security layers:
 
 ```
 script-src: 'self' https://sliples.agantis.in
