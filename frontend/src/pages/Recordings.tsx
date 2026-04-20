@@ -1,7 +1,6 @@
 import { useEffect, useState, useMemo } from 'react'
-import { Link, useNavigate } from 'react-router-dom'
+import { Link } from 'react-router-dom'
 import { useRecordingsStore } from '../store/recordings'
-import { useProjectsStore } from '../store/projects'
 
 export default function Recordings() {
   const navigate = useNavigate()

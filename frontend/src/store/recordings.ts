@@ -24,7 +24,7 @@ interface RecordingsState {
   clearError: () => void
 }
 
-export const useRecordingsStore = create<RecordingsState>()((set, get) => ({
+export const useRecordingsStore = create<RecordingsState>()((set) => ({
   sessions: [],
   currentSession: null,
   events: [],

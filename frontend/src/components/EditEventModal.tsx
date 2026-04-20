@@ -3,7 +3,7 @@ import { useParams } from 'react-router-dom'
 import { useRecordingsStore } from '../store/recordings'
 import { RecordedEvent, EventMetadataUpdate } from '../api/client'
 import Modal from './Modal'
-import KeyValueEditor from './KeyValueEditor'
+import KeyValueEditor, { KeyValuePair } from './KeyValueEditor'
 
 interface EditEventModalProps {
   event: RecordedEvent
@@ -43,7 +43,14 @@ export default function EditEventModal({ event, onClose }: EditEventModalProps) 
     }
   }
 
-  const handleParameterChange = (newParams: Record<string, string>) => {
+  const handleParameterChange = (pairs: KeyValuePair[]) => {
+    const newParams = pairs.reduce(
+      (acc, pair) => {
+        if (pair.key) acc[pair.key] = pair.value
+        return acc
+      },
+      {} as Record<string, string>,
+    )
     setParameters(newParams)
   }
 
@@ -92,22 +99,10 @@ export default function EditEventModal({ event, onClose }: EditEventModalProps) 
               Extract values into parameters that can be reused across steps. Format: param_name = variable_name
             </p>
             <KeyValueEditor
-              items={Object.entries(parameters).map(([key, value]) => ({ key, value }))}
-              onItemsChange={(items) =>
-                handleParameterChange(
-                  items.reduce(
-                    (acc, item) => {
-                      if (item.key) acc[item.key] = item.value
-                      return acc
-                    },
-                    {} as Record<string, string>,
-                  ),
-                )
-              }
+              pairs={Object.entries(parameters).map(([key, value]) => ({ key, value }))}
+              onChange={handleParameterChange}
               keyPlaceholder="e.g., username"
               valuePlaceholder="e.g., USER_EMAIL"
-              keyLabel="Parameter"
-              valueLabel="Variable"
             />
           </div>
           <p className="text-xs text-gray-500">
