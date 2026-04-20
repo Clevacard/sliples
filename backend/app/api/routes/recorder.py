@@ -753,6 +753,9 @@ async def get_recorder_snippet(
           const data = await resp.json();
           console.log('[Sliples] Recording stopped. Events:', data.event_count);
           console.log('[Sliples] View at: ' + CONFIG.endpoint.replace('/api/v1', '') + '/recordings/' + this.sessionId);
+        }} else {{
+          const errText = await resp.text();
+          console.error('[Sliples] Failed to stop recording. Status:', resp.status, errText);
         }}
       }} catch (e) {{
         console.error('[Sliples] Failed to stop recording:', e);
