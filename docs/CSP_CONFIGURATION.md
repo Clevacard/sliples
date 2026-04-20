@@ -2,7 +2,9 @@
 
 ## Overview
 
-The Sliples recorder snippet requires external script loading from `https://sliples.agantis.in`. If your website has strict Content Security Policy (CSP) headers, you may see errors blocking the recorder from loading.
+The Sliples recorder snippet is served from `https://sliples.agantis.in/api/v1/recorder/snippet.js` and is **publicly accessible** without authentication. The endpoint supports CORS (Cross-Origin Resource Sharing) to allow loading from any website.
+
+If your website still has strict Content Security Policy (CSP) headers, you may need to add Sliples to your whitelist for optimal compatibility.
 
 ## Error Messages
 
@@ -13,7 +15,7 @@ Refused to connect because it violates the document's Content Security Policy
 Fetch API cannot load https://sliples.agantis.in/api/v1/recorder/snippet.js
 ```
 
-This means the website's CSP headers don't allow loading scripts from the Sliples domain.
+This means the website's CSP headers don't allow loading scripts from the Sliples domain. The snippet endpoint is publicly accessible, but your CSP policy is blocking cross-origin requests.
 
 ## Solution: Update CSP Headers
 
