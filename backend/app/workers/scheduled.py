@@ -120,15 +120,20 @@ def check_scheduled_runs():
         triggered_count = 0
 
         for schedule in due_schedules:
-            # Trigger the scheduled run
-            execute_scheduled_run.delay(str(schedule.id))
-            triggered_count += 1
+            try:
+                # Trigger the scheduled run
+                execute_scheduled_run.delay(str(schedule.id))
+                triggered_count += 1
 
-            # Update next_run_at using the schedule's timezone
-            timezone = schedule.timezone or "UTC"
-            schedule.next_run_at = calculate_next_run_with_timezone(
-                schedule.cron_expression, timezone, now
-            )
+                # Update next_run_at using the schedule's timezone
+                timezone = schedule.timezone or "UTC"
+                schedule.next_run_at = calculate_next_run_with_timezone(
+                    schedule.cron_expression, timezone, now
+                )
+            except Exception as e:
+                import logging
+                logger = logging.getLogger(__name__)
+                logger.error(f"Failed to trigger schedule {schedule.id} ({schedule.name}): {e}")
 
         if triggered_count > 0:
             db.commit()

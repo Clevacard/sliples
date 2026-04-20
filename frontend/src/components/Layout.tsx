@@ -19,6 +19,7 @@ const navigation: NavItem[] = [
   { name: 'Scenarios', path: '/scenarios' },
   { name: 'Custom Steps', path: '/custom-steps' },
   { name: 'Test Runs', path: '/runs' },
+  { name: 'Recordings', path: '/recordings', highlight: true },
   { name: 'Test Mode', path: '/test-mode', highlight: true },
   { name: 'Schedules', path: '/schedules' },
   { name: 'Repos', path: '/repos' },

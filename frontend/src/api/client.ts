@@ -549,6 +549,7 @@ export interface Schedule {
   last_run_at: string | null
   next_run_at: string | null
   last_run_id: string | null
+  last_run_status: string | null
   created_at: string
   updated_at: string
 }
@@ -941,4 +942,87 @@ export interface BuiltinPattern {
 export async function getBuiltinPatterns(): Promise<BuiltinPattern[]> {
   const response = await api.get('/parser/patterns')
   return response.data
+}
+
+// =============================================================================
+// Recorder (UI Event Recording)
+// =============================================================================
+
+export interface RecordingSession {
+  id: string
+  project_id?: string
+  name: string
+  url: string
+  status: 'recording' | 'stopped' | 'converted'
+  user_agent?: string
+  viewport_width?: number
+  viewport_height?: number
+  created_at: string
+  stopped_at?: string
+  event_count: number
+}
+
+export interface RecordedEvent {
+  id: string
+  sequence: number
+  timestamp: string
+  event_type: string
+  selector_css?: string
+  selector_xpath?: string
+  selector_text?: string
+  selector_test_id?: string
+  selector_aria?: string
+  tag_name?: string
+  element_id?: string
+  label_text?: string
+  value?: string
+  url?: string
+  coordinates?: { x: number; y: number }
+  key_info?: {
+    key?: string
+    code?: string
+    ctrl: boolean
+    alt: boolean
+    shift: boolean
+    meta: boolean
+  }
+  step_label?: string
+  should_screenshot?: boolean
+  parameters?: Record<string, string>
+  notes?: string
+}
+
+export interface EventMetadataUpdate {
+  step_label?: string
+  should_screenshot?: boolean
+  parameters?: Record<string, string>
+  notes?: string
+}
+
+export async function getRecordingSessions(): Promise<RecordingSession[]> {
+  const response = await api.get('/recorder/sessions')
+  return response.data
+}
+
+export async function getRecordingSession(sessionId: string): Promise<RecordingSession> {
+  const response = await api.get(`/recorder/sessions/${sessionId}`)
+  return response.data
+}
+
+export async function getRecordingEvents(sessionId: string): Promise<RecordedEvent[]> {
+  const response = await api.get(`/recorder/sessions/${sessionId}/events`)
+  return response.data
+}
+
+export async function updateEventMetadata(
+  sessionId: string,
+  eventId: string,
+  data: EventMetadataUpdate,
+): Promise<RecordedEvent> {
+  const response = await api.patch(`/recorder/sessions/${sessionId}/events/${eventId}`, data)
+  return response.data
+}
+
+export async function deleteRecordingSession(sessionId: string): Promise<void> {
+  await api.delete(`/recorder/sessions/${sessionId}`)
 }

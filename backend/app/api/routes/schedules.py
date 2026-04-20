@@ -206,6 +206,7 @@ class ScheduleResponse(BaseModel):
     last_run_at: Optional[datetime]
     next_run_at: Optional[datetime]
     last_run_id: Optional[UUID]
+    last_run_status: Optional[str] = None  # Status of the last triggered TestRun
     created_at: datetime
     updated_at: datetime
 
@@ -215,12 +216,21 @@ class ScheduleResponse(BaseModel):
 
 def schedule_to_response(schedule: Schedule, db: Session = None) -> ScheduleResponse:
     """Convert a Schedule model to a ScheduleResponse."""
+    from app.models import TestRun
+
     # Look up environment names if db session provided
     environment_names = []
     if db and schedule.environment_ids:
         envs = db.query(Environment).filter(Environment.id.in_(schedule.environment_ids)).all()
         env_map = {env.id: env.name for env in envs}
         environment_names = [env_map.get(env_id, "Unknown") for env_id in schedule.environment_ids]
+
+    # Look up last run status if db session and last_run_id provided
+    last_run_status = None
+    if db and schedule.last_run_id:
+        last_run = db.query(TestRun.status).filter(TestRun.id == schedule.last_run_id).first()
+        if last_run:
+            last_run_status = last_run.status.value
 
     return ScheduleResponse(
         id=schedule.id,
@@ -239,6 +249,7 @@ def schedule_to_response(schedule: Schedule, db: Session = None) -> ScheduleResp
         last_run_at=schedule.last_run_at,
         next_run_at=schedule.next_run_at,
         last_run_id=schedule.last_run_id,
+        last_run_status=last_run_status,
         created_at=schedule.created_at,
         updated_at=schedule.updated_at,
     )
@@ -436,7 +447,9 @@ async def toggle_schedule(
     schedule.enabled = not schedule.enabled
 
     if schedule.enabled:
-        schedule.next_run_at = calculate_next_run(schedule.cron_expression)
+        from app.workers.scheduled import calculate_next_run_with_timezone
+        timezone = schedule.timezone or "UTC"
+        schedule.next_run_at = calculate_next_run_with_timezone(schedule.cron_expression, timezone)
     else:
         schedule.next_run_at = None
 

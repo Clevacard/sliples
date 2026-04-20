@@ -66,7 +66,8 @@ def execute_test_run(self, run_id: str):
         try:
             run = db.query(TestRun).filter(TestRun.id == UUID(run_id)).first()
             if run:
-                run.progress_message = message
+                # Truncate to 500 chars to fit DB column
+                run.progress_message = message[:500] if len(message) > 500 else message
                 db.commit()
 
                 # Publish progress update via Redis pub/sub
@@ -83,6 +84,7 @@ def execute_test_run(self, run_id: str):
             logger.info(f"[{run_id}] {message}")
         except Exception as e:
             logger.warning(f"Failed to update progress: {e}")
+            db.rollback()  # Ensure transaction is rolled back on error
 
     try:
         # Fetch the test run
@@ -312,7 +314,8 @@ def execute_test_run(self, run_id: str):
                 old_status = run.status.value
                 run.status = RunStatus.ERROR
                 run.finished_at = datetime.utcnow()
-                run.progress_message = f"Error: {str(e)}"
+                error_msg = f"Error: {str(e)}"
+                run.progress_message = error_msg[:500] if len(error_msg) > 500 else error_msg
                 db.commit()
 
                 # Publish error and completion events via Redis pub/sub
@@ -334,8 +337,9 @@ def execute_test_run(self, run_id: str):
                     failed=failed_count,
                     skipped=0,
                 )
-        except Exception:
-            pass
+        except Exception as inner_e:
+            logger.warning(f"Failed to update error status: {inner_e}")
+            db.rollback()
         raise self.retry(exc=e, countdown=60)  # Retry after 1 minute
     finally:
         db.close()

@@ -29,7 +29,7 @@ spec:
           imagePullPolicy: IfNotPresent
           command:
             - npx
-            - playwright
+            - playwright@1.58.0
             - run-server
             - --port=3000
           env:

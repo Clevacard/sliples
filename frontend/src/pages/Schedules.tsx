@@ -279,9 +279,35 @@ export default function Schedules() {
                           <span className="ml-1 text-gray-600">({formatDateTime(schedule.next_run_at)})</span>
                         )}
                       </div>
-                      <div>
+                      <div className="flex items-center gap-1.5">
                         <span className="text-gray-400">Last run:</span>{' '}
-                        <span>{formatRelativeTime(schedule.last_run_at)}</span>
+                        {schedule.last_run_id ? (
+                          <a
+                            href={`/runs/${schedule.last_run_id}`}
+                            className="hover:underline"
+                          >
+                            <span>{formatRelativeTime(schedule.last_run_at)}</span>
+                          </a>
+                        ) : (
+                          <span>{formatRelativeTime(schedule.last_run_at)}</span>
+                        )}
+                        {schedule.last_run_status && (
+                          <span
+                            className={`inline-flex px-1.5 py-0.5 text-[10px] font-semibold rounded ${
+                              schedule.last_run_status === 'passed'
+                                ? 'bg-green-500/20 text-green-400'
+                                : schedule.last_run_status === 'failed'
+                                  ? 'bg-red-500/20 text-red-400'
+                                  : schedule.last_run_status === 'running'
+                                    ? 'bg-blue-500/20 text-blue-400'
+                                    : schedule.last_run_status === 'error'
+                                      ? 'bg-orange-500/20 text-orange-400'
+                                      : 'bg-gray-500/20 text-gray-400'
+                            }`}
+                          >
+                            {schedule.last_run_status}
+                          </span>
+                        )}
                       </div>
                     </div>
                   </div>

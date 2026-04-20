@@ -283,7 +283,7 @@ def create_schedules(db: Session, env: Environment) -> list[Schedule]:
             cron_expression=schedule_data["cron_expression"],
             scenario_tags=schedule_data["scenario_tags"],
             scenario_ids=[],
-            environment_id=env.id,
+            environment_ids=[env.id],
             browsers=schedule_data["browsers"],
             enabled=schedule_data["enabled"],
             created_by="seed_data",

@@ -125,9 +125,22 @@ class RecordedEventResponse(BaseModel):
     url: Optional[str]
     coordinates: Optional[dict]
     key_info: Optional[dict]
+    # User annotations
+    step_label: Optional[str]
+    should_screenshot: bool
+    parameters: Optional[dict]
+    notes: Optional[str]
 
     class Config:
         from_attributes = True
+
+
+class EventMetadataUpdate(BaseModel):
+    """Request schema for updating event metadata."""
+    step_label: Optional[str] = None
+    should_screenshot: Optional[bool] = None
+    parameters: Optional[dict] = None
+    notes: Optional[str] = None
 
 
 # =============================================================================
@@ -343,9 +356,70 @@ async def get_recording_events(
             url=e.url,
             coordinates=e.coordinates,
             key_info=e.key_info,
+            step_label=e.step_label,
+            should_screenshot=e.should_screenshot or False,
+            parameters=e.parameters,
+            notes=e.notes,
         )
         for e in events
     ]
+
+
+@router.patch("/recorder/sessions/{session_id}/events/{event_id}", response_model=RecordedEventResponse)
+async def update_event_metadata(
+    session_id: UUID,
+    event_id: UUID,
+    data: EventMetadataUpdate,
+    db: Session = Depends(get_db),
+    _api_key: str = Depends(get_api_key),
+):
+    """Update event annotations (label, screenshot flag, parameters, notes)."""
+    session = db.query(RecordingSession).filter(RecordingSession.id == session_id).first()
+    if not session:
+        raise HTTPException(status_code=status.HTTP_404_NOT_FOUND, detail="Recording session not found")
+
+    event = db.query(RecordedEvent).filter(
+        RecordedEvent.id == event_id,
+        RecordedEvent.session_id == session_id,
+    ).first()
+    if not event:
+        raise HTTPException(status_code=status.HTTP_404_NOT_FOUND, detail="Event not found")
+
+    # Update fields that are provided
+    if data.step_label is not None:
+        event.step_label = data.step_label
+    if data.should_screenshot is not None:
+        event.should_screenshot = data.should_screenshot
+    if data.parameters is not None:
+        event.parameters = data.parameters
+    if data.notes is not None:
+        event.notes = data.notes
+
+    db.commit()
+    db.refresh(event)
+
+    return RecordedEventResponse(
+        id=event.id,
+        sequence=event.sequence,
+        timestamp=event.timestamp,
+        event_type=event.event_type,
+        selector_css=event.selector_css,
+        selector_xpath=event.selector_xpath,
+        selector_text=event.selector_text,
+        selector_test_id=event.selector_test_id,
+        selector_aria=event.selector_aria,
+        tag_name=event.tag_name,
+        element_id=event.element_id,
+        label_text=event.label_text,
+        value=event.value,
+        url=event.url,
+        coordinates=event.coordinates,
+        key_info=event.key_info,
+        step_label=event.step_label,
+        should_screenshot=event.should_screenshot or False,
+        parameters=event.parameters,
+        notes=event.notes,
+    )
 
 
 @router.delete("/recorder/sessions/{session_id}", status_code=status.HTTP_204_NO_CONTENT)

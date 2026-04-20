@@ -5,7 +5,7 @@ from datetime import datetime
 from typing import Optional
 from uuid import UUID, uuid4
 
-from sqlalchemy import Column, String, DateTime, Enum, ForeignKey, Text, JSON, Integer
+from sqlalchemy import Column, String, DateTime, Enum, ForeignKey, Text, JSON, Integer, Boolean
 from sqlalchemy.dialects.postgresql import UUID as PG_UUID
 from sqlalchemy.orm import relationship
 
@@ -76,6 +76,12 @@ class RecordedEvent(Base):
 
     # Additional context
     extra_data = Column(JSON, nullable=True)  # Any additional event-specific data
+
+    # User annotations (added during review)
+    step_label = Column(Text, nullable=True)  # Human-readable step name
+    should_screenshot = Column(Boolean, default=False)  # Mark for screenshot
+    parameters = Column(JSON, nullable=True)  # Extracted params: {"field": "varName"}
+    notes = Column(Text, nullable=True)  # Additional notes
 
     # Relationships
     session = relationship("RecordingSession", back_populates="events")

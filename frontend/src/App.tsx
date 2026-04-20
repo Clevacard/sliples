@@ -20,6 +20,8 @@ import CreateProject from './pages/CreateProject'
 import ProjectSettings from './pages/ProjectSettings'
 import Pages from './pages/Pages'
 import AdminRoute from './components/AdminRoute'
+import Recordings from './pages/Recordings'
+import RecordingDetails from './pages/RecordingDetails'
 
 function App() {
   return (
@@ -52,6 +54,8 @@ function App() {
         <Route path="custom-steps" element={<CustomSteps />} />
         <Route path="schedules" element={<Schedules />} />
         <Route path="test-mode" element={<TestMode />} />
+        <Route path="recordings" element={<Recordings />} />
+        <Route path="recordings/:id" element={<RecordingDetails />} />
         <Route path="settings" element={<Settings />} />
         <Route
           path="users"

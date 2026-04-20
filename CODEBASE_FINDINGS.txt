@@ -1,0 +1,811 @@
+═══════════════════════════════════════════════════════════════════════════════
+                  SLIPLES CODEBASE EXPLORATION - COMPLETE FINDINGS
+═══════════════════════════════════════════════════════════════════════════════
+
+## 1. SCENARIO/FEATURE FILE PARSING & STORAGE
+
+1.1 Parser Service
+─────────────────
+📁 File: /Users/ptrk/Agantis/sliples/backend/app/api/routes/parser.py (260 lines)
+
+Key Components:
+  • extract_steps() - Parses Gherkin content, returns (line_num, keyword, text, full_line)
+  • BUILTIN_PATTERNS - 90+ regex patterns for common BDD steps
+  • match_step() - Matches step text against patterns (custom first, then builtin)
+  • POST /parser/validate - Endpoint to validate Gherkin content
+
+Relevant Code:
+  Lines 147-164: extract_steps() function
+  Lines 167-189: match_step() function with precedence (custom > builtin)
+  Lines 18-120: BUILTIN_PATTERNS array (90+ patterns)
+  Lines 192-245: POST /parser/validate endpoint
+
+1.2 Scenario Model
+──────────────────
+📁 File: /Users/ptrk/Agantis/sliples/backend/app/models/scenario.py (49 lines)
+
+Key Fields:
+  • id: UUID primary key
+  • name: Scenario name
+  • content: Text - Full Gherkin content
+  • tags: ARRAY(String) - Tags like @smoke, @critical
+  • feature_path: Path to .feature file
+  • repo_id: Reference to ScenarioRepo
+  • project_id: Reference to Project
+
+Scenario Parsing Flow:
+  1. Content stored as plain text in DB
+  2. Parsed on-demand via extract_steps()
+  3. Each step validated against patterns
+  4. Results include match status and pattern source
+
+---
+
+## 2. TEST STEP EXECUTION
+
+2.1 Test Executor Service
+─────────────────────────
+📁 File: /Users/ptrk/Agantis/sliples/backend/app/services/test_executor.py (968 lines)
+
+Core Classes:
+  • GherkinStepRegistry - Registry of step handlers
+  • TestExecutor - Main executor class
+  • StepResult - Data class for step results
+  • ScenarioResult - Data class for scenario results
+  • TestExecutionResult - Aggregated results
+
+Key Classes & Methods:
+
+  GherkinStepRegistry class (lines 47-430):
+    - __init__(pages=None) - Initialize with page mappings
+    - register(pattern, handler) - Register new step handler
+    - find_handler(step_text) - Find matching handler for step
+    - set_pages(pages_dict) - Update page mappings
+    - resolve_page(name) - Resolve page name to path
+    - _register_builtin_steps() - Register 20+ built-in handlers
+    
+    Built-in handlers:
+      - _step_navigate() - Navigate to URL or named page
+      - _step_click() - Click by test-id/role/text
+      - _step_fill() - Fill form inputs
+      - _step_should_see() - Assert text visible
+      - _step_element_visible() - Assert element visible
+      - _step_wait() - Wait for duration
+      - _step_select() - Select dropdown option
+      - _step_screenshot() - Take screenshot
+      - etc. (20+ more handlers)
+
+  TestExecutor class (lines 550-800):
+    - create_context(base_url, locale, timezone_id)
+    - execute_scenario(page, scenario_dict)
+    - _execute_custom_step_code(page, code, params)
+
+  Key function: run_test_execution() (lines 895-965):
+    Parameters:
+      • run_id - Unique run identifier
+      • scenarios - List of {id, name, content} dicts
+      • browser - "chromium", "firefox", "webkit"
+      • base_url - Environment URL
+      • locale - Browser locale (e.g., "en-GB")
+      • timezone_id - IANA timezone (e.g., "Europe/London")
+      • custom_steps - Dict of {pattern: code}
+      • pages - Dict of {page_name: path}
+      • progress_callback - Function for progress updates
+    
+    Returns: TestExecutionResult with scenarios, steps, status
+
+2.2 Custom Step Execution
+──────────────────────────
+📁 File: /Users/ptrk/Agantis/sliples/backend/app/services/test_executor.py
+Lines: 620-730
+
+Process:
+  1. Pattern match extracts captured groups as parameters
+  2. Parameters passed as dict to custom code execution
+  3. Code wrapped in isolated async function:
+     ```python
+     async def __custom_step__(page, __params__):
+         {param_assignments}
+         {user_code}
+     ```
+  4. Code executed via Python exec() with controlled namespace
+  5. Only 'page' and '__params__' available to user code
+
+Example:
+  Pattern: r'I fill "([^"]*)" with "([^"]*)"'
+  Step: 'I fill "username" with "john@example.com"'
+  Captured params: {"field": "username", "value": "john@example.com"}
+  Code can use: field, value variables
+
+2.3 Page Navigation
+────────────────────
+📁 File: /Users/ptrk/Agantis/sliples/backend/app/services/test_executor.py
+Lines: 291-315
+
+_step_navigate() method:
+  1. Check if url_or_page matches named page (resolve_page)
+  2. If named page found, use its path
+  3. If relative path (no http/https), prepend base_url
+  4. Navigate via page.goto() with "domcontentloaded" wait
+
+Base URL handling:
+  • Stored on page object: page._base_url
+  • Used for relative URL resolution
+  • Set during context creation
+
+---
+
+## 3. ENVIRONMENT MODEL & VARIABLES
+
+3.1 Environment Model
+─────────────────────
+📁 File: /Users/ptrk/Agantis/sliples/backend/app/models/environment.py (48 lines)
+
+Table: environments
+
+Fields:
+  • id: UUID primary key
+  • project_id: FK to projects
+  • name: String(100) - Environment name
+  • base_url: String(500) - Base URL for tests
+  • locale: String(20) - Browser locale (default: "en-GB")
+  • timezone_id: String(50) - IANA timezone (default: "Europe/London")
+  • credentials_env: String(100) - Reference to env variable
+  • variables: JSON - KEY FIELD ← Empty dict default
+  • retention_days: Integer(365) - Data retention period
+  • created_at: DateTime
+
+Related Model: BrowserConfig (lines 36-47)
+  • Specifies browser/version combinations per environment
+  • FK to environment_id
+  • Fields: browser, version, channel
+
+✓ STATUS: Variables field ALREADY EXISTS and is JSON type!
+
+3.2 Environment API Routes
+───────────────────────────
+📁 File: /Users/ptrk/Agantis/sliples/backend/app/api/routes/environments.py (392 lines)
+
+Pydantic Models:
+
+  EnvironmentCreate (lines 74-88):
+    • name: str
+    • base_url: str
+    • locale: str = "en-GB"
+    • timezone_id: str = "Europe/London"
+    • variables: dict = {}  ← Accepts on create
+    • retention_days: int = 365
+    • browser_configs: list[BrowserConfigCreate]
+
+  EnvironmentUpdate (lines 90-106):
+    • All fields optional
+    • variables: Optional[dict] = None  ← Can update
+
+  EnvironmentResponse (lines 108-122):
+    • Returns all fields including variables: dict
+
+API Endpoints:
+  • GET /environments (lines 124-134)
+    Returns: list[EnvironmentResponse]
+    Filtering: by project_id
+  
+  • POST /environments (lines 137-186)
+    Creates environment with variables dict
+    Validates unique name within project
+    Adds browser configs if provided
+  
+  • GET /environments/{id} (lines 189-199)
+    Returns single environment with variables
+  
+  • PUT /environments/{id} (lines 202-250)
+    Updates environment including variables
+    Handles browser_configs replacement
+  
+  • DELETE /environments/{id} (lines 253-274)
+    Removes environment
+
+Browser Config Endpoints: (lines 277-392)
+  • GET /environments/{id}/browsers
+  • POST /environments/{id}/browsers
+  • PUT /environments/{id}/browsers/{config_id}
+  • DELETE /environments/{id}/browsers/{config_id}
+
+---
+
+## 4. FRONTEND IMPLEMENTATION
+
+4.1 API Client Types
+─────────────────────
+📁 File: /Users/ptrk/Agantis/sliples/frontend/src/api/client.ts
+
+Environment Type (lines 142-154):
+  ```typescript
+  export interface Environment {
+    id: string
+    project_id?: string
+    name: string
+    base_url: string
+    locale?: string
+    timezone_id?: string
+    credentials_env?: string
+    variables: Record<string, string>  ← Key field
+    retention_days: number
+    created_at?: string
+  }
+  ```
+
+EnvironmentCreate Type (lines 156-163):
+  ```typescript
+  export interface EnvironmentCreate {
+    name: string
+    base_url: string
+    locale?: string
+    timezone_id?: string
+    variables?: Record<string, string>
+    retention_days?: number
+  }
+  ```
+
+EnvironmentUpdate Type (lines 165-172):
+  All fields optional, including variables
+
+API Functions (lines 174-196):
+  • getEnvironments() → Promise<Environment[]>
+  • getEnvironment(id) → Promise<Environment>
+  • createEnvironment(data) → Promise<Environment>
+  • updateEnvironment(id, data) → Promise<Environment>
+  • deleteEnvironment(id) → Promise<void>
+
+4.2 Environment Form Component
+───────────────────────────────
+📁 File: /Users/ptrk/Agantis/sliples/frontend/src/components/EnvironmentForm.tsx (305 lines)
+
+Form State:
+  • name, baseUrl, locale, timezoneId
+  • variables: KeyValuePair[] (array)
+  • retentionDays, errors
+
+Key Functions:
+  recordToPairs() (lines 13-15) - Convert Record<string, string> to KeyValuePair[]
+  pairsToRecord() (lines 18-25) - Convert KeyValuePair[] to Record<string, string>
+  isValidUrl() (lines 28-35) - Validate URL format
+
+Form Validation (lines 73-99):
+  • Name: required
+  • Base URL: required, valid URL format
+  • Retention Days: 1-3650
+  • Variables: no duplicate keys allowed
+
+Form Submission (lines 101-118):
+  Converts form state to API payload:
+  ```typescript
+  const data = {
+    name, base_url, locale, timezone_id,
+    variables: pairsToRecord(variables),
+    retention_days
+  }
+  ```
+
+Variable Section (lines 253-272):
+  Uses KeyValueEditor component to manage variables
+
+4.3 KeyValue Editor Component
+──────────────────────────────
+📁 File: /Users/ptrk/Agantis/sliples/frontend/src/components/KeyValueEditor.tsx (168 lines)
+
+Features:
+  • Add/remove key-value pairs
+  • Automatic masking of sensitive values
+  • Toggle visibility of sensitive values
+  • Validation for duplicate keys
+
+Sensitive Key Detection (lines 18-32):
+  DEFAULT_SENSITIVE_PATTERNS:
+    - /password/i
+    - /secret/i
+    - /token/i
+    - /api.?key/i
+    - /credential/i
+    - /auth/i
+
+UI Implementation:
+  • Key input: text field
+  • Value input: toggles between text/password type
+  • Visibility toggle button (eye icon) for sensitive values
+  • Remove button per pair
+  • Add Variable button at bottom
+
+4.4 Environments Page
+──────────────────────
+📁 File: /Users/ptrk/Agantis/sliples/frontend/src/pages/Environments.tsx (354 lines)
+
+Display Features:
+  • Variable count badge per environment (lines 192-194)
+  • Expandable card to show all variables (lines 245-274)
+  • Automatic masking of sensitive values in display (lines 258-260)
+  • Mask function masks first 2 + last 2 chars (line 25)
+
+Sensitive Pattern Matching (lines 8-19):
+  Same patterns as KeyValueEditor for consistency
+
+Card Expansion (lines 55-65):
+  • Toggle expand/collapse per environment
+  • Shows variables only if count > 0
+
+Variable Display (lines 252-270):
+  Shows key=value pairs with masking for sensitive keys
+
+4.5 Environments Store
+──────────────────────
+📁 File: /Users/ptrk/Agantis/sliples/frontend/src/store/environments.ts (126 lines)
+
+Zustand Store State:
+  • environments: Environment[]
+  • selectedEnvironment: Environment | null
+  • isLoading: boolean
+  • error: string | null
+
+Store Actions:
+  • fetchEnvironments() - GET /environments
+  • fetchEnvironment(id) - GET /environments/{id}
+  • createEnvironment(data) - POST /environments
+  • updateEnvironment(id, data) - PUT /environments/{id}
+  • deleteEnvironment(id) - DELETE /environments/{id}
+  • selectEnvironment(env) - Set selected env
+  • clearError() - Clear error message
+
+---
+
+## 5. CUSTOM STEPS
+
+5.1 Custom Step Model
+──────────────────────
+📁 File: /Users/ptrk/Agantis/sliples/backend/app/models/custom_step.py (30 lines)
+
+Table: custom_steps
+
+Fields:
+  • id: UUID primary key
+  • project_id: FK to projects (nullable)
+  • repo_id: FK to scenario_repos (nullable)
+  • name: String(255) - Human-readable name
+  • pattern: String(500) - Regex pattern for matching
+  • code: Text - Python implementation
+  • committed: Boolean - Whether saved to repo
+  • created_at, updated_at: DateTime
+
+5.2 Custom Steps Routes
+────────────────────────
+📁 File: /Users/ptrk/Agantis/sliples/backend/app/api/routes/steps.py (198 lines)
+
+Pydantic Models:
+
+  StepCreate (lines 22-32):
+    • repo_id: Optional[UUID]
+    • name: str
+    • pattern: str
+    • code: Optional[str]
+    • implementation: Optional[str] (alias for frontend)
+    • description: Optional[str]
+
+  StepUpdate (lines 35-44):
+    All fields optional
+
+  StepResponse (lines 47-57):
+    • id, project_id, repo_id, name, pattern, code, committed
+
+API Endpoints:
+
+  GET /steps or /steps/custom (lines 60-74):
+    Optional filtering by repo_id
+    Returns: list[StepResponse]
+  
+  POST /steps or /steps/custom (lines 77-118):
+    Creates custom step
+    Validates unique pattern within project
+    Sets committed=False by default
+  
+  PUT /steps/{id} or /steps/custom/{id} (lines 121-151):
+    Updates pattern, name, code
+    Sets committed=False if code/pattern changed
+  
+  POST /steps/custom/{id}/save-to-repo (lines 154-172):
+    Marks committed=True (TODO: git commit)
+  
+  DELETE /steps/{id} or /steps/custom/{id} (lines 175-198):
+    Deletes custom step
+
+5.3 Custom Step End-to-End Flow
+────────────────────────────────
+
+Creation:
+  1. User navigates to CustomSteps page
+  2. Enters pattern (regex) and Python code
+  3. POST /steps with pattern and code
+  4. Backend validates pattern is valid regex
+  5. Stores in custom_steps table with committed=False
+
+Validation (during scenario parsing):
+  1. GET /scenarios or POST /parser/validate
+  2. Custom steps loaded for project
+  3. Custom patterns checked FIRST (line 173, parser.py)
+  4. First matching pattern wins
+  5. Returns validation result including custom_step_id
+
+Execution (during test run):
+  1. Celery task loads test run
+  2. Loads all custom steps from DB (line 155, tasks.py):
+     custom_steps[pattern] = code
+  3. Executor receives custom_steps dict
+  4. For each step:
+     a. Match pattern against step text
+     b. Extract captured groups as parameters
+     c. Build isolated async function with params
+     d. Execute via exec() (line 723, test_executor.py)
+     e. Capture screenshot/error on failure
+
+---
+
+## 6. INTERACTIVE EXECUTOR (TEST MODE)
+
+6.1 Interactive Executor Service
+─────────────────────────────────
+📁 File: /Users/ptrk/Agantis/sliples/backend/app/services/interactive_executor.py (300+ lines)
+
+Classes:
+
+  InteractiveExecutor (lines 47-110):
+    Class-level session management
+    Methods:
+      • create_session() - Create new browser session
+      • get_session() - Retrieve existing session
+      • end_session() - Close and cleanup session
+      • list_active_sessions() - List all active sessions
+
+  InteractiveSession (lines 113+):
+    Instance managing single browser session
+    Constructor parameters:
+      • session_id, browser_type, base_url
+      • headless=False (always visible for interactive)
+      • pages, locale, timezone_id
+    
+    Methods:
+      • start() - Launch browser
+      • stop() - Close browser
+      • execute_step() - Execute single step interactively
+      • set_pages() - Update page mappings
+      • load_scenario() - Parse and load scenario steps
+
+6.2 Test Session Routes
+────────────────────────
+📁 File: /Users/ptrk/Agantis/sliples/backend/app/api/routes/test_session.py (300+ lines)
+
+Request Models:
+
+  TestSessionCreate (lines 49-53):
+    • scenario_id: Optional[UUID]
+    • environment_id: UUID
+    • browser_type: str = "chromium"
+
+  StepExecuteRequest (lines 74-76):
+    • step_index: Optional[int]
+
+  LoadScenarioRequest (lines 111-115):
+    • scenario_id: Optional[UUID]
+    • content: Optional[str] - Direct Gherkin content
+
+API Endpoints:
+
+  POST /test-session/start (lines 142-200):
+    Creates interactive test session
+    Loads environment, scenario, pages
+    Launches Playwright browser (headless=False)
+    Returns session ID and WebSocket URL
+  
+  WebSocket endpoints for real-time interaction:
+    - Step execution
+    - Screenshot capture
+    - Status updates
+
+---
+
+## 7. TEST EXECUTION FLOW (END-TO-END)
+
+7.1 Test Run Trigger
+─────────────────────
+📁 File: /Users/ptrk/Agantis/sliples/backend/app/api/routes/runs.py (400+ lines)
+
+Request Model:
+
+  TestRunCreate (lines 34-39):
+    • scenario_tags: list[str]
+    • scenario_ids: list[UUID]
+    • environment: str (environment name)
+    • browsers: list[str] = ["chrome"]
+    • parallel: bool = True
+
+API Endpoint:
+
+  POST /runs (lines 112-200):
+    1. Finds environment by name (line 137)
+    2. Resolves scenario IDs from tags if needed (lines 145-159)
+    3. Creates TestRun record in DB (lines 182-194)
+    4. Queues Celery task: execute_test_run.delay(run_id) (line 198)
+    5. Returns TestRun response with status=QUEUED
+
+7.2 Celery Task Execution
+──────────────────────────
+📁 File: /Users/ptrk/Agantis/sliples/backend/app/workers/tasks.py (250+ lines)
+
+Celery Task:
+
+  execute_test_run(run_id: str) (lines 44-248):
+    1. Fetch TestRun from DB
+    2. Update status to RUNNING
+    3. Load Environment (line 120):
+       environment = run.environment
+    4. Load Scenarios from scenario_ids
+    5. Load CustomSteps (lines 154-157):
+       custom_steps[pattern] = code
+    6. Load Pages (lines 162-168):
+       load_pages_for_environment(db, project_id, environment_id)
+    7. Call run_test_execution() (lines 176-188):
+       ⚠️ PASSES:
+         • run_id, scenarios, browser, base_url
+         • locale (environment.locale)
+         • timezone_id (environment.timezone_id)
+         • custom_steps, pages
+       
+       ⚠️ DOES NOT PASS:
+         • environment.variables ← JSON dict exists but unused!
+
+7.3 Test Results Storage
+────────────────────────
+📁 File: /Users/ptrk/Agantis/sliples/backend/app/models/test_run.py (79 lines)
+
+Table: test_runs
+
+Fields:
+  • id: UUID PK
+  • project_id: FK to projects
+  • scenario_ids: ARRAY(UUID)
+  • environment_id: FK to environments
+  • status: Enum(QUEUED, RUNNING, PASSED, FAILED, ERROR, CANCELLED)
+  • browser, browser_version
+  • triggered_by, parallel
+  • started_at, finished_at, expires_at
+  • report_html, email_sent
+  • progress_message, created_at
+
+Table: test_results
+
+Fields:
+  • id: UUID PK
+  • test_run_id: FK to test_runs
+  • scenario_id: Optional FK to scenarios
+  • scenario_name: String
+  • step_name: String
+  • status: Enum(PENDING, PASSED, FAILED, SKIPPED, ERROR)
+  • duration_ms: Integer
+  • error_message: Text (nullable)
+  • screenshot_url: String (nullable)
+  • created_at: DateTime
+
+---
+
+## 8. PAGES & NAMED NAVIGATION
+
+8.1 Page Model
+──────────────
+📁 File: /Users/ptrk/Agantis/sliples/backend/app/models/page.py (80 lines)
+
+Table: pages
+
+Fields:
+  • id: UUID PK
+  • project_id: FK to projects (NOT nullable)
+  • name: String(100) - "Login", "Dashboard"
+  • path: String(500) - "/login", "/dashboard"
+  • description: Text
+  • created_at, updated_at: DateTime
+
+Constraint: Unique (project_id, name)
+
+Usage in Steps:
+  Step: "When I navigate to the 'Login' page"
+  Resolution:
+    1. Extract "Login" from step
+    2. Look up page named "Login" in project
+    3. Get path (e.g., "/login")
+    4. Apply environment override if exists
+    5. Prepend base_url: https://example.com/login
+
+8.2 Page Environment Override
+──────────────────────────────
+📁 File: /Users/ptrk/Agantis/sliples/backend/app/models/page.py (50-79)
+
+Table: page_environment_overrides
+
+Purpose:
+  Allow different page paths per environment
+  Example: Staging uses /auth/login instead of /login
+
+Fields:
+  • id: UUID PK
+  • page_id: FK to pages
+  • environment_id: FK to environments
+  • path: String(500) - Override path for this environment
+  • created_at: DateTime
+
+Constraint: Unique (page_id, environment_id)
+
+Flow (from tasks.py lines 16-39):
+  1. Get all pages for project
+  2. Get all overrides for environment
+  3. For each page:
+     path = override_map.get(page.id, page.path)
+  4. Build result: {page_name: resolved_path}
+
+---
+
+## 9. VARIABLE/PARAMETER HANDLING
+
+9.1 Named Page Resolution
+──────────────────────────
+📁 File: /Users/ptrk/Agantis/sliples/backend/app/services/test_executor.py
+Lines: 63-84
+
+resolve_page() method:
+  1. Try exact match: if name in self._pages
+  2. Try case-insensitive match
+  3. Return path or None
+
+Usage in _step_navigate():
+  • Lines 297-300: Check if url_or_page is named page
+  • Lines 301-302: Log resolved page
+  • Lines 306-312: Build full URL with base_url
+
+9.2 Custom Step Parameter Capture
+────────────────────────────────────
+📁 File: /Users/ptrk/Agantis/sliples/backend/app/services/test_executor.py
+Lines: 823-828
+
+During step execution:
+  1. Regex pattern matched with fullmatch()
+  2. Match groups extracted: match.groups()
+  3. Convert groups to dict:
+     param_dict = {}
+     for i, value in enumerate(match.groups()):
+         param_dict[param_names[i]] = value
+  4. Pass to custom step execution
+
+Example:
+  Pattern: r'I fill "([^"]*)" with "([^"]*)"'
+  Step text: 'I fill "email" with "test@example.com"'
+  match.groups() = ("email", "test@example.com")
+  Converted to: {"field": "email", "value": "test@example.com"}
+  Available in code as: field, value
+
+9.3 Browser Context Configuration
+────────────────────────────────────
+📁 File: /Users/ptrk/Agantis/sliples/backend/app/services/test_executor.py
+Lines: 560-580
+
+create_context() method parameters:
+  • base_url: str
+  • locale: str = "en-GB"
+  • timezone_id: str = "Europe/London"
+
+Browser context created with:
+  ```python
+  context_kwargs = {
+      "base_url": base_url,
+      "locale": locale,
+      "timezone_id": timezone_id,
+  }
+  self._context = await self._browser.new_context(**context_kwargs)
+  ```
+
+Effects:
+  • locale: Affects number/date formatting, LTR/RTL
+  • timezone_id: Browser sees configured timezone
+  • base_url: Used for relative URL resolution
+
+---
+
+## 10. EXISTING CONCEPTS SUMMARY
+
+✓ Variables Field
+  Location: Environment.variables (JSON column)
+  Storage: Dictionary of string key-value pairs
+  Status: FULLY IMPLEMENTED at DB and frontend
+  Usage: ⚠️ NOT integrated into test execution yet
+
+✓ Locale & Timezone
+  Location: Environment.locale, Environment.timezone_id
+  Status: FULLY IMPLEMENTED and actively used
+  Implementation: Passed to Playwright browser context
+  Effect: Browser displays dates/times/text in configured locale
+
+✓ Parameter Capture in Custom Steps
+  Location: test_executor.py line 825, _execute_custom_step_code()
+  Status: FULLY IMPLEMENTED
+  Mechanism: Regex group capture and parameter passing
+  Availability: Parameters accessible as variables in custom code
+
+✓ Pages & Named Navigation
+  Location: models/page.py (pages + page_environment_overrides)
+  Status: FULLY IMPLEMENTED with environment-specific overrides
+  Flow: Step → Extract page name → Load from DB → Apply override → Prepend base_url
+
+✓ Custom Step Execution
+  Location: test_executor.py lines 620-730, _execute_custom_step_code()
+  Status: FULLY IMPLEMENTED
+  Mechanism: Isolated Python exec() with controlled namespace
+  Isolation: Only 'page' and '__params__' available to user code
+
+✓ Project-Scoped Resources
+  Scenarios: project_id FK
+  Custom Steps: project_id FK
+  Environments: project_id FK
+  Pages: project_id FK (NOT nullable)
+  All scoped and filtered by project context
+
+---
+
+## KEY INSIGHT: THE VARIABLES GAP
+
+The environment.variables field is:
+  ✓ Stored in PostgreSQL as JSON
+  ✓ Exposed in API (GET/POST/PUT endpoints)
+  ✓ Managed in frontend (form, editor, display)
+  ✓ Loaded in Celery task (line 120, tasks.py)
+
+BUT it is:
+  ✗ NOT passed to test executor
+  ✗ NOT available to custom steps
+  ✗ NOT available to builtin steps
+  ✗ NOT documented or demonstrated
+
+Flow break: tasks.py line 120 loads environment with variables,
+           but line 176 doesn't pass variables to run_test_execution()
+
+---
+
+## FILES QUICK REFERENCE
+
+BACKEND MODELS (5 files):
+  • /Users/ptrk/Agantis/sliples/backend/app/models/environment.py (48 lines)
+  • /Users/ptrk/Agantis/sliples/backend/app/models/scenario.py (49 lines)
+  • /Users/ptrk/Agantis/sliples/backend/app/models/custom_step.py (30 lines)
+  • /Users/ptrk/Agantis/sliples/backend/app/models/test_run.py (79 lines)
+  • /Users/ptrk/Agantis/sliples/backend/app/models/page.py (80 lines)
+
+BACKEND ROUTES (6 files):
+  • /Users/ptrk/Agantis/sliples/backend/app/api/routes/parser.py (260 lines)
+  • /Users/ptrk/Agantis/sliples/backend/app/api/routes/environments.py (392 lines)
+  • /Users/ptrk/Agantis/sliples/backend/app/api/routes/steps.py (198 lines)
+  • /Users/ptrk/Agantis/sliples/backend/app/api/routes/runs.py (400+ lines)
+  • /Users/ptrk/Agantis/sliples/backend/app/api/routes/test_session.py (300+ lines)
+
+BACKEND SERVICES (3 files):
+  • /Users/ptrk/Agantis/sliples/backend/app/services/test_executor.py (968 lines)
+  • /Users/ptrk/Agantis/sliples/backend/app/services/interactive_executor.py (300+ lines)
+  • /Users/ptrk/Agantis/sliples/backend/app/workers/tasks.py (250+ lines)
+
+FRONTEND API (1 file):
+  • /Users/ptrk/Agantis/sliples/frontend/src/api/client.ts (custom types/functions)
+
+FRONTEND COMPONENTS (2 files):
+  • /Users/ptrk/Agantis/sliples/frontend/src/components/EnvironmentForm.tsx (305 lines)
+  • /Users/ptrk/Agantis/sliples/frontend/src/components/KeyValueEditor.tsx (168 lines)
+
+FRONTEND PAGES (1 file):
+  • /Users/ptrk/Agantis/sliples/frontend/src/pages/Environments.tsx (354 lines)
+
+FRONTEND STORE (1 file):
+  • /Users/ptrk/Agantis/sliples/frontend/src/store/environments.ts (126 lines)
+
+TOTAL: 16 files analyzed, 4100+ lines of relevant code
+
+═══════════════════════════════════════════════════════════════════════════════
