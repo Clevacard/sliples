@@ -5,7 +5,8 @@ from contextlib import asynccontextmanager
 from fastapi import FastAPI
 from fastapi.middleware.cors import CORSMiddleware
 from starlette.middleware.base import BaseHTTPMiddleware
-from starlette.responses import Response
+from starlette.responses import Response, StreamingResponse
+from starlette.datastructures import MutableHeaders
 
 from app.api.routes import health, environments, scenarios, runs, repos, steps, browsers, auth, users, schedules, seed, test_session, projects, pages, parser, recorder
 from app.api.routes import settings as settings_routes
@@ -18,15 +19,25 @@ class PublicCORSMiddleware(BaseHTTPMiddleware):
     """Custom middleware to add CORS headers for public endpoints."""
 
     async def dispatch(self, request, call_next):
-        # Add CORS headers for recorder snippet endpoint
+        # Handle CORS preflight for recorder snippet
         if request.url.path == "/api/v1/recorder/snippet.js":
+            if request.method == "OPTIONS":
+                return Response(
+                    status_code=200,
+                    headers={
+                        "Access-Control-Allow-Origin": "*",
+                        "Access-Control-Allow-Methods": "GET, OPTIONS",
+                        "Access-Control-Allow-Headers": "Content-Type",
+                        "Access-Control-Max-Age": "86400",
+                    },
+                )
             response = await call_next(request)
-            response.headers["Access-Control-Allow-Origin"] = "*"
-            response.headers["Access-Control-Allow-Methods"] = "GET, OPTIONS"
-            response.headers["Access-Control-Allow-Headers"] = "Content-Type"
-            response.headers["Cache-Control"] = "public, max-age=3600"
-            # Debug header
-            response.headers["X-Cors-Added"] = "true"
+            # Use MutableHeaders to modify response headers
+            headers = MutableHeaders(response.headers)
+            headers["Access-Control-Allow-Origin"] = "*"
+            headers["Access-Control-Allow-Methods"] = "GET, OPTIONS"
+            headers["Access-Control-Allow-Headers"] = "Content-Type"
+            headers["Cache-Control"] = "public, max-age=3600"
             return response
 
         response = await call_next(request)
@@ -51,21 +62,22 @@ app = FastAPI(
     lifespan=lifespan,
 )
 
-# CORS middleware - Allow all origins for public endpoints like recorder snippet
-cors_origins = settings.cors_origins if settings.cors_origins != ["*"] else ["*"]
-allow_credentials = cors_origins != ["*"]  # Can't use credentials with wildcard
-app.add_middleware(
-    CORSMiddleware,
-    allow_origins=cors_origins,
-    allow_credentials=allow_credentials,
-    allow_methods=["*"],
-    allow_headers=["*"],
-    expose_headers=["*"],
-)
-
 # Custom CORS middleware for public endpoints like recorder snippet
-# Added AFTER CORS middleware so it runs first (LIFO order)
+# Must be added LAST (runs first - LIFO order)
 app.add_middleware(PublicCORSMiddleware)
+
+# CORS middleware - for authenticated endpoints
+# Only use credentials if not using wildcard origins
+cors_origins = settings.cors_origins
+if cors_origins != ["*"]:
+    app.add_middleware(
+        CORSMiddleware,
+        allow_origins=cors_origins,
+        allow_credentials=True,
+        allow_methods=["*"],
+        allow_headers=["*"],
+        expose_headers=["*"],
+    )
 
 # Include routers
 app.include_router(projects.router, prefix="/api/v1", tags=["Projects"])
