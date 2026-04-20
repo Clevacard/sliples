@@ -5,7 +5,7 @@ from typing import Optional
 from uuid import UUID
 
 from fastapi import APIRouter, Depends, HTTPException, status, Response
-from fastapi.responses import PlainTextResponse
+from fastapi.responses import PlainTextResponse, FileResponse
 from pydantic import BaseModel, Field
 from sqlalchemy.orm import Session
 
@@ -442,15 +442,25 @@ async def get_recorder_snippet(
     api_key: str,
     endpoint: Optional[str] = None,
     project_id: Optional[str] = None,
+    response: Response = None,
 ):
     """
     Get the recorder JavaScript snippet configured for this API key.
+
+    This endpoint is publicly accessible and can be embedded on any website.
+    CORS headers are set to allow cross-origin loading.
 
     Query params:
     - api_key: Required API key for authentication
     - endpoint: Optional custom API endpoint (defaults to this server)
     - project_id: Optional project ID to associate recordings with
     """
+    # Set CORS headers to allow loading from any origin
+    if response:
+        response.headers["Access-Control-Allow-Origin"] = "*"
+        response.headers["Access-Control-Allow-Methods"] = "GET, OPTIONS"
+        response.headers["Access-Control-Allow-Headers"] = "Content-Type"
+        response.headers["Cache-Control"] = "public, max-age=3600"
     # Build the snippet with embedded configuration
     config = {
         "apiKey": api_key,
@@ -761,3 +771,18 @@ async def get_recorder_snippet(
 }})();
 """
     return snippet
+
+
+@router.options("/recorder/snippet.js")
+async def options_recorder_snippet(response: Response = None):
+    """
+    Handle CORS preflight requests for the snippet endpoint.
+
+    This allows browsers to make cross-origin requests to load the snippet.
+    """
+    if response:
+        response.headers["Access-Control-Allow-Origin"] = "*"
+        response.headers["Access-Control-Allow-Methods"] = "GET, OPTIONS"
+        response.headers["Access-Control-Allow-Headers"] = "Content-Type"
+        response.headers["Access-Control-Max-Age"] = "86400"
+    return {"status": "ok"}

@@ -4,12 +4,33 @@ from contextlib import asynccontextmanager
 
 from fastapi import FastAPI
 from fastapi.middleware.cors import CORSMiddleware
+from starlette.middleware.base import BaseHTTPMiddleware
+from starlette.responses import Response
 
 from app.api.routes import health, environments, scenarios, runs, repos, steps, browsers, auth, users, schedules, seed, test_session, projects, pages, parser, recorder
 from app.api.routes import settings as settings_routes
 from app.config import get_settings
 from app.database import engine
 from app.models import Base
+
+
+class PublicCORSMiddleware(BaseHTTPMiddleware):
+    """Custom middleware to add CORS headers for public endpoints."""
+
+    async def dispatch(self, request, call_next):
+        # Add CORS headers for recorder snippet endpoint
+        if request.url.path == "/api/v1/recorder/snippet.js":
+            response = await call_next(request)
+            response.headers["Access-Control-Allow-Origin"] = "*"
+            response.headers["Access-Control-Allow-Methods"] = "GET, OPTIONS"
+            response.headers["Access-Control-Allow-Headers"] = "Content-Type"
+            response.headers["Cache-Control"] = "public, max-age=3600"
+            # Debug header
+            response.headers["X-Cors-Added"] = "true"
+            return response
+
+        response = await call_next(request)
+        return response
 
 
 @asynccontextmanager
@@ -30,14 +51,21 @@ app = FastAPI(
     lifespan=lifespan,
 )
 
-# CORS middleware
+# CORS middleware - Allow all origins for public endpoints like recorder snippet
+cors_origins = settings.cors_origins if settings.cors_origins != ["*"] else ["*"]
+allow_credentials = cors_origins != ["*"]  # Can't use credentials with wildcard
 app.add_middleware(
     CORSMiddleware,
-    allow_origins=settings.cors_origins,
-    allow_credentials=True,
+    allow_origins=cors_origins,
+    allow_credentials=allow_credentials,
     allow_methods=["*"],
     allow_headers=["*"],
+    expose_headers=["*"],
 )
+
+# Custom CORS middleware for public endpoints like recorder snippet
+# Added AFTER CORS middleware so it runs first (LIFO order)
+app.add_middleware(PublicCORSMiddleware)
 
 # Include routers
 app.include_router(projects.router, prefix="/api/v1", tags=["Projects"])

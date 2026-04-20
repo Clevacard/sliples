@@ -29,7 +29,7 @@ class Settings(BaseSettings):
 
     # Security
     secret_key: str = "change-this-in-production"
-    allowed_origins: str = "http://localhost:5173,http://localhost:3000"
+    allowed_origins: str = "*"
 
     # Google OAuth2 / Workspace SSO
     google_client_id: str = ""
@@ -55,6 +55,8 @@ class Settings(BaseSettings):
     @property
     def cors_origins(self) -> list[str]:
         """Parse CORS origins from comma-separated string."""
+        if self.allowed_origins == "*":
+            return ["*"]
         return [origin.strip() for origin in self.allowed_origins.split(",")]
 
     @property
