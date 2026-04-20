@@ -11,6 +11,7 @@ Welcome to the Sliples documentation. This directory contains comprehensive guid
 ### Feature Guides
 - **[Recorder Guide](./RECORDER_GUIDE.md)** - Guide to the browser recorder snippet
 - **[Recording Quick Reference](./RECORDING_QUICK_REFERENCE.md)** - Quick lookup guide for recording workflows
+- **[CSP Configuration](./CSP_CONFIGURATION.md)** - Content Security Policy setup for snippet embedding
 - **[Recording Sessions Feature](./RECORDINGS_FEATURE.md)** - Technical overview of the recording sessions feature
 - **[Start Recording Modal](./RECORDING_SNIPPET_FEATURE.md)** - Guide to the start recording UI and API key generation
 
@@ -53,6 +54,7 @@ Welcome to the Sliples documentation. This directory contains comprehensive guid
 | USER_GUIDE.md | Platform overview and main features | Everyone |
 | RECORDING_USER_GUIDE.md | How to record and annotate UI interactions | QA Engineers |
 | RECORDING_QUICK_REFERENCE.md | Quick lookup for recording workflows | QA Engineers, Everyone |
+| CSP_CONFIGURATION.md | Content Security Policy setup for embedding | Developers, Website Admins |
 | RECORDER_GUIDE.md | Browser recorder snippet reference | Developers embedding Sliples |
 | RECORDINGS_FEATURE.md | Technical design of recording system | Developers, QA |
 | RECORDING_SNIPPET_FEATURE.md | Start recording UI and API key generation | Developers, QA |
@@ -79,6 +81,7 @@ A: See [Architecture Plan - Requirements](./ARCHITECTURE_PLAN.md)
 ### Troubleshooting
 
 - **Recording not working?** → See [Recording User Guide - Troubleshooting](./RECORDING_USER_GUIDE.md#troubleshooting)
+- **CSP violation errors?** → Check [CSP Configuration Guide](./CSP_CONFIGURATION.md)
 - **API errors?** → Check [API Documentation - Error Codes](./API.md)
 - **Deployment issues?** → See [Deployment Guide](./DEPLOYMENT.md)
 
@@ -98,6 +101,7 @@ When updating documentation:
 - ✅ USER_GUIDE.md - Current
 - ✅ RECORDING_USER_GUIDE.md - Current (as of 2026-04-20)
 - ✅ RECORDING_QUICK_REFERENCE.md - Current (as of 2026-04-20)
+- ✅ CSP_CONFIGURATION.md - Current (as of 2026-04-20)
 - ✅ RECORDER_GUIDE.md - Current
 - ✅ RECORDINGS_FEATURE.md - Current
 - ✅ RECORDING_SNIPPET_FEATURE.md - Current
