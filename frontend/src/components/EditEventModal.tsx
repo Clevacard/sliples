@@ -2,7 +2,7 @@ import { useState } from 'react'
 import { useParams } from 'react-router-dom'
 import { useRecordingsStore } from '../store/recordings'
 import { RecordedEvent, EventMetadataUpdate } from '../api/client'
-import Modal from './Modal'
+import Modal, { ModalFooter } from './Modal'
 import KeyValueEditor, { KeyValuePair } from './KeyValueEditor'
 
 interface EditEventModalProps {
@@ -56,7 +56,7 @@ export default function EditEventModal({ event, onClose }: EditEventModalProps) 
 
   return (
     <Modal isOpen={true} onClose={onClose} title={`Edit Step ${event.sequence}`} size="lg">
-      <div className="space-y-6">
+      <div className="space-y-6 pb-12">
         {error && (
           <div className="bg-red-900/30 border border-red-700 rounded p-3">
             <p className="text-red-200 text-sm">{error}</p>
@@ -151,22 +151,23 @@ export default function EditEventModal({ event, onClose }: EditEventModalProps) 
         </div>
       </div>
 
-      {/* Footer */}
-      <div className="flex gap-3 justify-end mt-8 pt-6 border-t border-gray-700">
-        <button
-          onClick={onClose}
-          className="btn btn-secondary"
-          disabled={isSaving}
-        >
-          Cancel
-        </button>
-        <button
-          onClick={handleSave}
-          className="btn btn-primary"
-          disabled={isSaving}
-        >
-          {isSaving ? 'Saving...' : 'Save Changes'}
-        </button>
+        {/* Footer */}
+        <ModalFooter>
+          <button
+            onClick={onClose}
+            className="btn btn-secondary"
+            disabled={isSaving}
+          >
+            Cancel
+          </button>
+          <button
+            onClick={handleSave}
+            className="btn btn-primary"
+            disabled={isSaving}
+          >
+            {isSaving ? 'Saving...' : 'Save Changes'}
+          </button>
+        </ModalFooter>
       </div>
     </Modal>
   )
