@@ -10,7 +10,7 @@ from pydantic import BaseModel, Field
 from sqlalchemy.orm import Session
 
 from app.database import get_db
-from app.models import RecordingSession, RecordedEvent, RecordingStatus, Project, ApiKey
+from app.models import RecordingSession, RecordedEvent, RecordingStatus, Project, ApiKey, PlaybackRun, PlaybackStepResult, PlaybackStatus, PlaybackStepStatus, Environment, BrowserConfig
 from app.api.deps import get_api_key, verify_project_access, get_validated_api_key, get_api_key_or_user
 
 
@@ -443,6 +443,236 @@ async def delete_recording(
 
     db.delete(session)
     db.commit()
+
+
+# =============================================================================
+# Playback Endpoints
+# =============================================================================
+
+
+class PlaybackStartRequest(BaseModel):
+    """Request to start a playback run."""
+    environment_id: UUID
+    browser: str = "chrome"
+    viewport_width: Optional[int] = None
+    viewport_height: Optional[int] = None
+
+
+class PlaybackRunResponse(BaseModel):
+    """Response for a playback run."""
+    id: UUID
+    session_id: UUID
+    environment_id: UUID
+    browser: str
+    status: str
+    viewport_width: Optional[int]
+    viewport_height: Optional[int]
+    started_at: Optional[datetime]
+    finished_at: Optional[datetime]
+    duration_ms: Optional[int]
+    progress_message: Optional[str]
+    total_steps: int
+    passed_steps: int
+    failed_steps: int
+    created_at: datetime
+
+    class Config:
+        from_attributes = True
+
+
+class PlaybackStepResultResponse(BaseModel):
+    """Response for a playback step result."""
+    id: UUID
+    event_id: UUID
+    sequence: int
+    status: str
+    duration_ms: Optional[int]
+    error_message: Optional[str]
+    selector_used: Optional[str]
+    screenshot_url: Optional[str]
+
+    class Config:
+        from_attributes = True
+
+
+@router.post("/recorder/sessions/{session_id}/playback", response_model=PlaybackRunResponse, status_code=status.HTTP_201_CREATED)
+async def start_playback(
+    session_id: UUID,
+    request: PlaybackStartRequest,
+    db: Session = Depends(get_db),
+    _auth = Depends(get_api_key_or_user),
+):
+    """
+    Start a playback run for a recording session.
+
+    This will queue the playback for execution in a Celery worker.
+    """
+    from app.workers.tasks import execute_playback
+
+    # Verify session exists
+    session = db.query(RecordingSession).filter(RecordingSession.id == session_id).first()
+    if not session:
+        raise HTTPException(status_code=status.HTTP_404_NOT_FOUND, detail="Recording session not found")
+
+    # Verify environment exists and has the requested browser
+    environment = db.query(Environment).filter(Environment.id == request.environment_id).first()
+    if not environment:
+        raise HTTPException(status_code=status.HTTP_404_NOT_FOUND, detail="Environment not found")
+
+    browser_config = db.query(BrowserConfig).filter(
+        BrowserConfig.environment_id == environment.id,
+        BrowserConfig.browser == request.browser
+    ).first()
+    if not browser_config:
+        raise HTTPException(
+            status_code=status.HTTP_400_BAD_REQUEST,
+            detail=f"Browser '{request.browser}' not configured for environment '{environment.name}'"
+        )
+
+    # Create playback run
+    playback_run = PlaybackRun(
+        session_id=session_id,
+        environment_id=request.environment_id,
+        browser=request.browser,
+        viewport_width=request.viewport_width or session.viewport_width,
+        viewport_height=request.viewport_height or session.viewport_height,
+        status=PlaybackStatus.pending,
+    )
+    db.add(playback_run)
+    db.commit()
+    db.refresh(playback_run)
+
+    # Queue for execution
+    execute_playback.delay(str(playback_run.id))
+
+    return PlaybackRunResponse(
+        id=playback_run.id,
+        session_id=playback_run.session_id,
+        environment_id=playback_run.environment_id,
+        browser=playback_run.browser,
+        status=playback_run.status.value,
+        viewport_width=playback_run.viewport_width,
+        viewport_height=playback_run.viewport_height,
+        started_at=playback_run.started_at,
+        finished_at=playback_run.finished_at,
+        duration_ms=playback_run.duration_ms,
+        progress_message=playback_run.progress_message,
+        total_steps=playback_run.total_steps,
+        passed_steps=playback_run.passed_steps,
+        failed_steps=playback_run.failed_steps,
+        created_at=playback_run.created_at,
+    )
+
+
+@router.get("/recorder/sessions/{session_id}/playback", response_model=list[PlaybackRunResponse])
+async def list_playback_runs(
+    session_id: UUID,
+    db: Session = Depends(get_db),
+    _auth = Depends(get_api_key_or_user),
+):
+    """List all playback runs for a recording session."""
+    runs = db.query(PlaybackRun).filter(
+        PlaybackRun.session_id == session_id
+    ).order_by(PlaybackRun.created_at.desc()).all()
+
+    return [
+        PlaybackRunResponse(
+            id=run.id,
+            session_id=run.session_id,
+            environment_id=run.environment_id,
+            browser=run.browser,
+            status=run.status.value,
+            viewport_width=run.viewport_width,
+            viewport_height=run.viewport_height,
+            started_at=run.started_at,
+            finished_at=run.finished_at,
+            duration_ms=run.duration_ms,
+            progress_message=run.progress_message,
+            total_steps=run.total_steps,
+            passed_steps=run.passed_steps,
+            failed_steps=run.failed_steps,
+            created_at=run.created_at,
+        )
+        for run in runs
+    ]
+
+
+@router.get("/recorder/playback/{playback_id}", response_model=PlaybackRunResponse)
+async def get_playback_run(
+    playback_id: UUID,
+    db: Session = Depends(get_db),
+    _auth = Depends(get_api_key_or_user),
+):
+    """Get a playback run by ID."""
+    run = db.query(PlaybackRun).filter(PlaybackRun.id == playback_id).first()
+    if not run:
+        raise HTTPException(status_code=status.HTTP_404_NOT_FOUND, detail="Playback run not found")
+
+    return PlaybackRunResponse(
+        id=run.id,
+        session_id=run.session_id,
+        environment_id=run.environment_id,
+        browser=run.browser,
+        status=run.status.value,
+        viewport_width=run.viewport_width,
+        viewport_height=run.viewport_height,
+        started_at=run.started_at,
+        finished_at=run.finished_at,
+        duration_ms=run.duration_ms,
+        progress_message=run.progress_message,
+        total_steps=run.total_steps,
+        passed_steps=run.passed_steps,
+        failed_steps=run.failed_steps,
+        created_at=run.created_at,
+    )
+
+
+@router.get("/recorder/playback/{playback_id}/results", response_model=list[PlaybackStepResultResponse])
+async def get_playback_results(
+    playback_id: UUID,
+    db: Session = Depends(get_db),
+    _auth = Depends(get_api_key_or_user),
+):
+    """Get step results for a playback run."""
+    results = db.query(PlaybackStepResult).filter(
+        PlaybackStepResult.playback_run_id == playback_id
+    ).order_by(PlaybackStepResult.sequence).all()
+
+    return [
+        PlaybackStepResultResponse(
+            id=r.id,
+            event_id=r.event_id,
+            sequence=r.sequence,
+            status=r.status.value,
+            duration_ms=r.duration_ms,
+            error_message=r.error_message,
+            selector_used=r.selector_used,
+            screenshot_url=r.screenshot_url,
+        )
+        for r in results
+    ]
+
+
+@router.get("/recorder/playback/{playback_id}/report")
+async def get_playback_report(
+    playback_id: UUID,
+    db: Session = Depends(get_db),
+    _auth = Depends(get_api_key_or_user),
+):
+    """Get HTML report for a playback run."""
+    run = db.query(PlaybackRun).filter(PlaybackRun.id == playback_id).first()
+    if not run:
+        raise HTTPException(status_code=status.HTTP_404_NOT_FOUND, detail="Playback run not found")
+
+    if not run.report_html:
+        # Generate on demand if not present
+        from app.services.playback_report_generator import PlaybackReportGenerator
+        generator = PlaybackReportGenerator(db)
+        generator.save_report(str(playback_id))
+        db.refresh(run)
+
+    from fastapi.responses import HTMLResponse
+    return HTMLResponse(content=run.report_html or "<html><body>Report not available</body></html>")
 
 
 @router.get("/recorder/snippet.js", response_class=PlainTextResponse)

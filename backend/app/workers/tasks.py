@@ -7,7 +7,7 @@ from uuid import UUID
 
 from app.workers.celery_app import celery_app
 from app.database import SessionLocal
-from app.models import ScenarioRepo, TestRun, TestResult, RunStatus, StepStatus, Scenario, CustomStep, Page, PageEnvironmentOverride
+from app.models import ScenarioRepo, TestRun, TestResult, RunStatus, StepStatus, Scenario, CustomStep, Page, PageEnvironmentOverride, PlaybackRun, PlaybackStepResult, PlaybackStatus, PlaybackStepStatus, RecordedEvent, Environment
 from app.services.s3_service import S3Service
 from app.services.test_executor import run_test_execution
 from app.services.websocket_pubsub import run_update_publisher
@@ -680,6 +680,182 @@ def execute_scheduled_run(self, schedule_id: str, manual_trigger: bool = False):
 
     except Exception as e:
         logger.error(f"Error executing scheduled run {schedule_id}: {e}")
+        raise self.retry(exc=e, countdown=60)
+    finally:
+        db.close()
+
+
+
+@celery_app.task(bind=True, max_retries=3)
+def execute_playback(self, playback_run_id: str):
+    """
+    Execute a recording playback.
+
+    This task:
+    1. Fetches the playback run configuration
+    2. Connects to the appropriate browser
+    3. Replays all recorded events
+    4. Captures screenshots on failure or when marked
+    5. Stores results in database
+    6. Generates HTML report
+    """
+    from app.services.playback_executor import PlaybackExecutor, run_playback
+    from app.services.s3_service import S3Service
+    from app.services.playback_report_generator import PlaybackReportGenerator
+
+    db = SessionLocal()
+    s3_service = None
+    passed_count = 0
+    failed_count = 0
+
+    def update_progress(message: str):
+        """Update progress message in database."""
+        try:
+            run = db.query(PlaybackRun).filter(PlaybackRun.id == UUID(playback_run_id)).first()
+            if run:
+                run.progress_message = message[:500] if len(message) > 500 else message
+                run.passed_steps = passed_count
+                run.failed_steps = failed_count
+                db.commit()
+            logger.info(f"[playback:{playback_run_id}] {message}")
+        except Exception as e:
+            logger.warning(f"Failed to update progress: {e}")
+            db.rollback()
+
+    try:
+        # Fetch playback run
+        run = db.query(PlaybackRun).filter(PlaybackRun.id == UUID(playback_run_id)).first()
+        if not run:
+            logger.error(f"Playback run {playback_run_id} not found")
+            return {"success": False, "error": "Playback run not found"}
+
+        update_progress("Initializing playback...")
+
+        # Update status to running
+        run.status = PlaybackStatus.running
+        run.started_at = datetime.utcnow()
+        db.commit()
+
+        # Fetch recording session and events
+        session = run.session
+        events = db.query(RecordedEvent).filter(
+            RecordedEvent.session_id == session.id
+        ).order_by(RecordedEvent.sequence).all()
+
+        if not events:
+            run.status = PlaybackStatus.failed
+            run.finished_at = datetime.utcnow()
+            run.progress_message = "No events to replay"
+            db.commit()
+            return {"success": False, "error": "No events to replay"}
+
+        run.total_steps = len(events)
+        db.commit()
+
+        # Fetch environment for locale/timezone
+        environment = run.environment
+        locale = environment.locale or "en-GB"
+        timezone_id = environment.timezone_id or "Europe/London"
+
+        # Initialize S3 service for screenshots
+        try:
+            s3_service = S3Service()
+        except Exception as e:
+            logger.warning(f"S3 service not available: {e}")
+
+        update_progress(f"Connecting to {run.browser} browser...")
+
+        # Create executor and run playback
+        executor = PlaybackExecutor(browser=run.browser)
+        loop = asyncio.get_event_loop()
+
+        def on_step_complete(step_num, total, status, error):
+            nonlocal passed_count, failed_count
+            if status == PlaybackStepStatus.passed:
+                passed_count += 1
+            else:
+                failed_count += 1
+            update_progress(f"Step {step_num}/{total}: {status.value}")
+
+        results = loop.run_until_complete(run_playback(
+            executor=executor,
+            events=events,
+            start_url=session.url,
+            viewport_width=run.viewport_width or session.viewport_width or 1280,
+            viewport_height=run.viewport_height or session.viewport_height or 720,
+            locale=locale,
+            timezone_id=timezone_id,
+            on_step_complete=on_step_complete,
+        ))
+
+        update_progress("Processing results...")
+
+        # Store step results
+        for result in results:
+            screenshot_url = None
+
+            # Upload screenshot if present
+            if result.get("screenshot") and s3_service:
+                try:
+                    s3_key = f"playback/{playback_run_id}/{result['sequence']}.png"
+                    s3_service.upload_screenshot(result["screenshot"], s3_key)
+                    screenshot_url = s3_key
+                except Exception as e:
+                    logger.warning(f"Failed to upload screenshot: {e}")
+
+            step_result = PlaybackStepResult(
+                playback_run_id=run.id,
+                event_id=result["event_id"],
+                sequence=result["sequence"],
+                status=result["status"],
+                duration_ms=result["duration_ms"],
+                error_message=result.get("error_message"),
+                selector_used=result.get("selector_used"),
+                screenshot_url=screenshot_url,
+            )
+            db.add(step_result)
+
+        # Update run summary
+        run.passed_steps = passed_count
+        run.failed_steps = failed_count
+        run.status = PlaybackStatus.passed if failed_count == 0 else PlaybackStatus.failed
+        run.finished_at = datetime.utcnow()
+        run.duration_ms = int((run.finished_at - run.started_at).total_seconds() * 1000)
+        db.commit()
+
+        update_progress("Generating report...")
+
+        # Generate report
+        try:
+            report_generator = PlaybackReportGenerator(db)
+            report_generator.save_report(playback_run_id)
+        except Exception as e:
+            logger.warning(f"Failed to generate report: {e}")
+
+        final_status = "passed" if failed_count == 0 else "failed"
+        update_progress(f"Playback {final_status}: {passed_count} passed, {failed_count} failed")
+
+        return {
+            "success": True,
+            "playback_run_id": playback_run_id,
+            "status": run.status.value,
+            "passed": passed_count,
+            "failed": failed_count,
+            "duration_ms": run.duration_ms,
+        }
+
+    except Exception as e:
+        logger.error(f"Error executing playback {playback_run_id}: {e}")
+        try:
+            run = db.query(PlaybackRun).filter(PlaybackRun.id == UUID(playback_run_id)).first()
+            if run:
+                run.status = PlaybackStatus.failed
+                run.finished_at = datetime.utcnow()
+                run.progress_message = f"Error: {str(e)}"[:500]
+                db.commit()
+        except Exception as inner_e:
+            logger.warning(f"Failed to update error status: {inner_e}")
+            db.rollback()
         raise self.retry(exc=e, countdown=60)
     finally:
         db.close()

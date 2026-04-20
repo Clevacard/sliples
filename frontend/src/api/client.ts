@@ -1026,3 +1026,60 @@ export async function updateEventMetadata(
 export async function deleteRecordingSession(sessionId: string): Promise<void> {
   await api.delete(`/recorder/sessions/${sessionId}`)
 }
+
+// Playback types and functions
+export interface PlaybackRun {
+  id: string
+  session_id: string
+  environment_id: string
+  browser: string
+  status: 'pending' | 'running' | 'passed' | 'failed'
+  viewport_width: number | null
+  viewport_height: number | null
+  started_at: string | null
+  finished_at: string | null
+  duration_ms: number | null
+  progress_message: string | null
+  total_steps: number
+  passed_steps: number
+  failed_steps: number
+  created_at: string
+}
+
+export interface PlaybackStepResult {
+  id: string
+  event_id: string
+  sequence: number
+  status: 'pending' | 'passed' | 'failed' | 'skipped'
+  duration_ms: number | null
+  error_message: string | null
+  selector_used: string | null
+  screenshot_url: string | null
+}
+
+export interface StartPlaybackRequest {
+  environment_id: string
+  browser: string
+  viewport_width?: number
+  viewport_height?: number
+}
+
+export async function startPlayback(sessionId: string, request: StartPlaybackRequest): Promise<PlaybackRun> {
+  const response = await api.post(`/recorder/sessions/${sessionId}/playback`, request)
+  return response.data
+}
+
+export async function getPlaybackRuns(sessionId: string): Promise<PlaybackRun[]> {
+  const response = await api.get(`/recorder/sessions/${sessionId}/playback`)
+  return response.data
+}
+
+export async function getPlaybackRun(playbackId: string): Promise<PlaybackRun> {
+  const response = await api.get(`/recorder/playback/${playbackId}`)
+  return response.data
+}
+
+export async function getPlaybackResults(playbackId: string): Promise<PlaybackStepResult[]> {
+  const response = await api.get(`/recorder/playback/${playbackId}/results`)
+  return response.data
+}

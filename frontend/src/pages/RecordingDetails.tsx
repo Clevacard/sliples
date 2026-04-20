@@ -2,7 +2,14 @@ import { useEffect, useState } from 'react'
 import { useParams, useNavigate } from 'react-router-dom'
 import { useRecordingsStore } from '../store/recordings'
 import EditEventModal from '../components/EditEventModal'
-import { RecordedEvent } from '../api/client'
+import {
+  RecordedEvent,
+  PlaybackRun,
+  startPlayback,
+  getPlaybackRuns,
+  getEnvironments,
+  Environment,
+} from '../api/client'
 
 export default function RecordingDetails() {
   const { id } = useParams<{ id: string }>()
@@ -11,11 +18,61 @@ export default function RecordingDetails() {
   const [expandedEventId, setExpandedEventId] = useState<string | null>(null)
   const [editingEvent, setEditingEvent] = useState<RecordedEvent | null>(null)
 
+  // Playback state
+  const [environments, setEnvironments] = useState<Environment[]>([])
+  const [playbackRuns, setPlaybackRuns] = useState<PlaybackRun[]>([])
+  const [showPlaybackModal, setShowPlaybackModal] = useState(false)
+  const [selectedEnvId, setSelectedEnvId] = useState<string>('')
+  const [selectedBrowser, setSelectedBrowser] = useState<string>('chrome')
+  const [startingPlayback, setStartingPlayback] = useState(false)
+  const [playbackError, setPlaybackError] = useState<string | null>(null)
+
   useEffect(() => {
     if (id) {
       fetchSessionDetails(id)
+      loadPlaybackData(id)
     }
   }, [id, fetchSessionDetails])
+
+  const loadPlaybackData = async (sessionId: string) => {
+    try {
+      const [envs, runs] = await Promise.all([getEnvironments(), getPlaybackRuns(sessionId)])
+      setEnvironments(envs)
+      setPlaybackRuns(runs)
+      if (envs.length > 0 && !selectedEnvId) {
+        setSelectedEnvId(envs[0].id)
+      }
+    } catch (e) {
+      console.error('Failed to load playback data:', e)
+    }
+  }
+
+  const handleStartPlayback = async () => {
+    if (!id || !selectedEnvId) return
+    setStartingPlayback(true)
+    setPlaybackError(null)
+    try {
+      const run = await startPlayback(id, {
+        environment_id: selectedEnvId,
+        browser: selectedBrowser,
+        viewport_width: currentSession?.viewport_width || undefined,
+        viewport_height: currentSession?.viewport_height || undefined,
+      })
+      setPlaybackRuns([run, ...playbackRuns])
+      setShowPlaybackModal(false)
+    } catch (e: any) {
+      setPlaybackError(e.message || 'Failed to start playback')
+    } finally {
+      setStartingPlayback(false)
+    }
+  }
+
+  const refreshPlaybackRuns = async () => {
+    if (id) {
+      const runs = await getPlaybackRuns(id)
+      setPlaybackRuns(runs)
+    }
+  }
 
   if (isLoading) {
     return (
@@ -77,6 +134,21 @@ export default function RecordingDetails() {
     return 'Unknown element'
   }
 
+  const getPlaybackStatusBadge = (status: string) => {
+    switch (status) {
+      case 'pending':
+        return 'bg-gray-600 text-gray-200'
+      case 'running':
+        return 'bg-blue-600 text-blue-100'
+      case 'passed':
+        return 'bg-green-600 text-green-100'
+      case 'failed':
+        return 'bg-red-600 text-red-100'
+      default:
+        return 'bg-gray-600'
+    }
+  }
+
   return (
     <div className="space-y-6">
       {/* Back button */}
@@ -94,9 +166,20 @@ export default function RecordingDetails() {
             <h1 className="text-3xl font-bold text-white mb-1">{currentSession.name}</h1>
             <p className="text-gray-400 text-sm truncate">{currentSession.url}</p>
           </div>
-          <span className={`badge ${currentSession.status === 'stopped' ? 'badge-success' : 'badge-info'}`}>
-            {currentSession.status}
-          </span>
+          <div className="flex items-center gap-3">
+            <button
+              onClick={() => setShowPlaybackModal(true)}
+              className="btn btn-primary"
+              disabled={currentSession.status === 'recording'}
+            >
+              ▶ Run Playback
+            </button>
+            <span
+              className={`badge ${currentSession.status === 'stopped' ? 'badge-success' : 'badge-info'}`}
+            >
+              {currentSession.status}
+            </span>
+          </div>
         </div>
 
         {error && (
@@ -113,7 +196,9 @@ export default function RecordingDetails() {
           </div>
           <div className="bg-gray-700/30 rounded p-3">
             <p className="text-xs text-gray-400 mb-1">Screenshots</p>
-            <p className="text-2xl font-bold text-white">{events.filter((e) => e.should_screenshot).length}</p>
+            <p className="text-2xl font-bold text-white">
+              {events.filter((e) => e.should_screenshot).length}
+            </p>
           </div>
           <div className="bg-gray-700/30 rounded p-3">
             <p className="text-xs text-gray-400 mb-1">Duration</p>
@@ -128,155 +213,299 @@ export default function RecordingDetails() {
         </div>
       </div>
 
-      {/* Events List */}
-      {events.length > 0 ? (
-        <div className="space-y-3">
-          {events.map((event) => (
-            <div key={event.id} className="card">
-              <button
-                onClick={() => setExpandedEventId(expandedEventId === event.id ? null : event.id)}
-                className="w-full text-left flex items-center justify-between hover:bg-gray-700/30 p-3 -m-3 p-4 rounded"
-              >
-                <div className="flex items-center gap-4 flex-1">
-                  <div className="w-8 h-8 bg-gray-700 rounded flex items-center justify-center text-xs text-gray-300 font-semibold">
-                    {event.sequence}
-                  </div>
-                  <div className="flex-1">
-                    <div className="flex items-center gap-3">
-                      <span className={`badge ${getEventTypeBadgeClass(event.event_type)}`}>
-                        {event.event_type}
-                      </span>
-                      <span className="text-gray-200 font-medium">{getElementDisplay(event)}</span>
-                      {event.should_screenshot && (
-                        <span className="text-xs bg-blue-900/30 text-blue-300 px-2 py-1 rounded">📷 Screenshot</span>
-                      )}
-                      {event.parameters && Object.keys(event.parameters).length > 0 && (
-                        <span className="text-xs bg-green-900/30 text-green-300 px-2 py-1 rounded">
-                          🔧 {Object.keys(event.parameters).length} param(s)
-                        </span>
-                      )}
-                    </div>
-                    <div className="flex items-center gap-4 text-xs text-gray-500 mt-2">
-                      <span>{formatDate(event.timestamp)}</span>
-                      {event.value && <span>Value: {event.value.substring(0, 50)}</span>}
-                      {event.selector_test_id && <span>ID: {event.selector_test_id}</span>}
-                    </div>
-                  </div>
-                </div>
-                <div className="text-gray-400">
-                  {expandedEventId === event.id ? '▼' : '▶'}
-                </div>
-              </button>
-
-              {/* Expanded Details */}
-              {expandedEventId === event.id && (
-                <div className="border-t border-gray-700 mt-4 pt-4 space-y-4">
-                  {/* Event Type & Value */}
-                  <div>
-                    <h4 className="text-sm font-semibold text-gray-300 mb-2">Event Details</h4>
-                    <div className="space-y-2 text-sm">
-                      <div>
-                        <span className="text-gray-500">Type:</span>
-                        <span className="text-gray-200 ml-2">{event.event_type}</span>
-                      </div>
-                      {event.value && (
-                        <div>
-                          <span className="text-gray-500">Value:</span>
-                          <span className="text-gray-200 ml-2 font-mono">{event.value}</span>
-                        </div>
-                      )}
-                      {event.coordinates && (
-                        <div>
-                          <span className="text-gray-500">Coordinates:</span>
-                          <span className="text-gray-200 ml-2">
-                            x: {event.coordinates.x}, y: {event.coordinates.y}
-                          </span>
-                        </div>
-                      )}
-                    </div>
-                  </div>
-
-                  {/* Element Info */}
-                  <div>
-                    <h4 className="text-sm font-semibold text-gray-300 mb-2">Element</h4>
-                    <div className="space-y-2 text-sm">
-                      {event.selector_css && (
-                        <div>
-                          <span className="text-gray-500">CSS:</span>
-                          <span className="text-gray-200 ml-2 font-mono text-xs break-all">{event.selector_css}</span>
-                        </div>
-                      )}
-                      {event.selector_test_id && (
-                        <div>
-                          <span className="text-gray-500">Test ID:</span>
-                          <span className="text-gray-200 ml-2 font-mono">{event.selector_test_id}</span>
-                        </div>
-                      )}
-                      {event.label_text && (
-                        <div>
-                          <span className="text-gray-500">Label:</span>
-                          <span className="text-gray-200 ml-2">{event.label_text}</span>
-                        </div>
-                      )}
-                    </div>
-                  </div>
-
-                  {/* User Annotations */}
-                  <div className="bg-gray-700/20 rounded p-3">
-                    <h4 className="text-sm font-semibold text-gray-300 mb-2">Annotations</h4>
-                    <div className="space-y-2 text-sm">
-                      {event.step_label && (
-                        <div>
-                          <span className="text-gray-500">Step Label:</span>
-                          <span className="text-blue-300 ml-2">{event.step_label}</span>
-                        </div>
-                      )}
-                      {event.should_screenshot && (
-                        <div className="text-green-300">✓ Mark for screenshot</div>
-                      )}
-                      {event.parameters && Object.keys(event.parameters).length > 0 && (
-                        <div>
-                          <span className="text-gray-500">Parameters:</span>
-                          <div className="mt-1 space-y-1 ml-4">
-                            {Object.entries(event.parameters).map(([key, value]) => (
-                              <div key={key} className="font-mono text-xs text-green-300">
-                                {key} = ${'{'}
-                                {value}
-                                {'}'}
-                              </div>
-                            ))}
-                          </div>
-                        </div>
-                      )}
-                      {event.notes && (
-                        <div>
-                          <span className="text-gray-500">Notes:</span>
-                          <p className="text-gray-200 ml-2 mt-1 text-xs">{event.notes}</p>
-                        </div>
-                      )}
-                    </div>
-                  </div>
-
-                  {/* Edit Button */}
-                  <button
-                    onClick={() => setEditingEvent(event)}
-                    className="w-full btn btn-sm bg-blue-600 hover:bg-blue-700 text-white"
-                  >
-                    Edit Annotations
-                  </button>
-                </div>
-              )}
-            </div>
-          ))}
-        </div>
-      ) : (
-        <div className="card text-center py-12">
-          <p className="text-gray-400">No events recorded</p>
+      {/* Playback Runs */}
+      {playbackRuns.length > 0 && (
+        <div className="card">
+          <div className="flex items-center justify-between mb-4">
+            <h2 className="text-xl font-semibold text-white">Playback Runs</h2>
+            <button onClick={refreshPlaybackRuns} className="btn btn-sm btn-secondary">
+              Refresh
+            </button>
+          </div>
+          <table className="w-full table-dark">
+            <thead>
+              <tr className="border-b border-gray-700">
+                <th className="text-left px-4 py-2 text-gray-300">Status</th>
+                <th className="text-left px-4 py-2 text-gray-300">Browser</th>
+                <th className="text-left px-4 py-2 text-gray-300">Steps</th>
+                <th className="text-left px-4 py-2 text-gray-300">Duration</th>
+                <th className="text-left px-4 py-2 text-gray-300">Started</th>
+                <th className="text-right px-4 py-2 text-gray-300">Actions</th>
+              </tr>
+            </thead>
+            <tbody>
+              {playbackRuns.map((run) => (
+                <tr key={run.id} className="border-b border-gray-700 hover:bg-gray-700/30">
+                  <td className="px-4 py-3">
+                    <span className={`px-2 py-1 rounded text-xs font-medium ${getPlaybackStatusBadge(run.status)}`}>
+                      {run.status}
+                    </span>
+                    {run.progress_message && run.status === 'running' && (
+                      <span className="ml-2 text-xs text-gray-400">{run.progress_message}</span>
+                    )}
+                  </td>
+                  <td className="px-4 py-3 text-gray-200">{run.browser}</td>
+                  <td className="px-4 py-3 text-gray-200">
+                    <span className="text-green-400">{run.passed_steps}</span>
+                    {' / '}
+                    <span className="text-red-400">{run.failed_steps}</span>
+                    {' / '}
+                    {run.total_steps}
+                  </td>
+                  <td className="px-4 py-3 text-gray-400">
+                    {run.duration_ms ? `${(run.duration_ms / 1000).toFixed(1)}s` : '-'}
+                  </td>
+                  <td className="px-4 py-3 text-gray-400 text-sm">
+                    {run.started_at ? formatDate(run.started_at) : '-'}
+                  </td>
+                  <td className="px-4 py-3 text-right">
+                    {(run.status === 'passed' || run.status === 'failed') && (
+                      <a
+                        href={`/api/v1/recorder/playback/${run.id}/report`}
+                        target="_blank"
+                        rel="noopener noreferrer"
+                        className="btn btn-sm bg-purple-600 hover:bg-purple-700 text-white"
+                      >
+                        View Report
+                      </a>
+                    )}
+                  </td>
+                </tr>
+              ))}
+            </tbody>
+          </table>
         </div>
       )}
 
+      {/* Events List */}
+      <div className="card">
+        <h2 className="text-xl font-semibold text-white mb-4">Recorded Events</h2>
+        {events.length > 0 ? (
+          <div className="space-y-3">
+            {events.map((event) => (
+              <div key={event.id} className="bg-gray-700/20 rounded-lg">
+                <button
+                  onClick={() => setExpandedEventId(expandedEventId === event.id ? null : event.id)}
+                  className="w-full text-left flex items-center justify-between hover:bg-gray-700/30 p-4 rounded-lg"
+                >
+                  <div className="flex items-center gap-4 flex-1">
+                    <div className="w-8 h-8 bg-gray-700 rounded flex items-center justify-center text-xs text-gray-300 font-semibold">
+                      {event.sequence}
+                    </div>
+                    <div className="flex-1">
+                      <div className="flex items-center gap-3">
+                        <span className={`badge ${getEventTypeBadgeClass(event.event_type)}`}>
+                          {event.event_type}
+                        </span>
+                        <span className="text-gray-200 font-medium">{getElementDisplay(event)}</span>
+                        {event.should_screenshot && (
+                          <span className="text-xs bg-blue-900/30 text-blue-300 px-2 py-1 rounded">
+                            Screenshot
+                          </span>
+                        )}
+                        {event.parameters && Object.keys(event.parameters).length > 0 && (
+                          <span className="text-xs bg-green-900/30 text-green-300 px-2 py-1 rounded">
+                            {Object.keys(event.parameters).length} param(s)
+                          </span>
+                        )}
+                      </div>
+                      <div className="flex items-center gap-4 text-xs text-gray-500 mt-2">
+                        <span>{formatDate(event.timestamp)}</span>
+                        {event.value && <span>Value: {event.value.substring(0, 50)}</span>}
+                        {event.selector_test_id && <span>ID: {event.selector_test_id}</span>}
+                      </div>
+                    </div>
+                  </div>
+                  <div className="text-gray-400">{expandedEventId === event.id ? '▼' : '▶'}</div>
+                </button>
+
+                {/* Expanded Details */}
+                {expandedEventId === event.id && (
+                  <div className="border-t border-gray-700 mx-4 mb-4 pt-4 space-y-4">
+                    {/* Event Type & Value */}
+                    <div>
+                      <h4 className="text-sm font-semibold text-gray-300 mb-2">Event Details</h4>
+                      <div className="space-y-2 text-sm">
+                        <div>
+                          <span className="text-gray-500">Type:</span>
+                          <span className="text-gray-200 ml-2">{event.event_type}</span>
+                        </div>
+                        {event.value && (
+                          <div>
+                            <span className="text-gray-500">Value:</span>
+                            <span className="text-gray-200 ml-2 font-mono">{event.value}</span>
+                          </div>
+                        )}
+                        {event.coordinates && (
+                          <div>
+                            <span className="text-gray-500">Coordinates:</span>
+                            <span className="text-gray-200 ml-2">
+                              x: {event.coordinates.x}, y: {event.coordinates.y}
+                            </span>
+                          </div>
+                        )}
+                      </div>
+                    </div>
+
+                    {/* Element Info */}
+                    <div>
+                      <h4 className="text-sm font-semibold text-gray-300 mb-2">Element</h4>
+                      <div className="space-y-2 text-sm">
+                        {event.selector_css && (
+                          <div>
+                            <span className="text-gray-500">CSS:</span>
+                            <span className="text-gray-200 ml-2 font-mono text-xs break-all">
+                              {event.selector_css}
+                            </span>
+                          </div>
+                        )}
+                        {event.selector_test_id && (
+                          <div>
+                            <span className="text-gray-500">Test ID:</span>
+                            <span className="text-gray-200 ml-2 font-mono">{event.selector_test_id}</span>
+                          </div>
+                        )}
+                        {event.label_text && (
+                          <div>
+                            <span className="text-gray-500">Label:</span>
+                            <span className="text-gray-200 ml-2">{event.label_text}</span>
+                          </div>
+                        )}
+                      </div>
+                    </div>
+
+                    {/* User Annotations */}
+                    <div className="bg-gray-700/20 rounded p-3">
+                      <h4 className="text-sm font-semibold text-gray-300 mb-2">Annotations</h4>
+                      <div className="space-y-2 text-sm">
+                        {event.step_label && (
+                          <div>
+                            <span className="text-gray-500">Step Label:</span>
+                            <span className="text-blue-300 ml-2">{event.step_label}</span>
+                          </div>
+                        )}
+                        {event.should_screenshot && (
+                          <div className="text-green-300">✓ Mark for screenshot</div>
+                        )}
+                        {event.parameters && Object.keys(event.parameters).length > 0 && (
+                          <div>
+                            <span className="text-gray-500">Parameters:</span>
+                            <div className="mt-1 space-y-1 ml-4">
+                              {Object.entries(event.parameters).map(([key, value]) => (
+                                <div key={key} className="font-mono text-xs text-green-300">
+                                  {key} = ${'{'}
+                                  {value}
+                                  {'}'}
+                                </div>
+                              ))}
+                            </div>
+                          </div>
+                        )}
+                        {event.notes && (
+                          <div>
+                            <span className="text-gray-500">Notes:</span>
+                            <p className="text-gray-200 ml-2 mt-1 text-xs">{event.notes}</p>
+                          </div>
+                        )}
+                      </div>
+                    </div>
+
+                    {/* Edit Button */}
+                    <button
+                      onClick={() => setEditingEvent(event)}
+                      className="w-full btn btn-sm bg-blue-600 hover:bg-blue-700 text-white"
+                    >
+                      Edit Annotations
+                    </button>
+                  </div>
+                )}
+              </div>
+            ))}
+          </div>
+        ) : (
+          <div className="text-center py-12">
+            <p className="text-gray-400">No events recorded</p>
+          </div>
+        )}
+      </div>
+
       {/* Edit Modal */}
       {editingEvent && <EditEventModal event={editingEvent} onClose={() => setEditingEvent(null)} />}
+
+      {/* Playback Modal */}
+      {showPlaybackModal && (
+        <div className="fixed inset-0 bg-black/50 flex items-center justify-center z-50">
+          <div className="bg-gray-800 rounded-lg p-6 max-w-md w-full mx-4">
+            <h3 className="text-lg font-semibold text-white mb-4">Start Playback</h3>
+
+            {playbackError && (
+              <div className="bg-red-900/30 border border-red-700 rounded p-3 mb-4">
+                <p className="text-red-200 text-sm">{playbackError}</p>
+              </div>
+            )}
+
+            <div className="space-y-4">
+              <div>
+                <label className="block text-sm font-medium text-gray-400 mb-2">Environment</label>
+                <select
+                  className="input w-full"
+                  value={selectedEnvId}
+                  onChange={(e) => setSelectedEnvId(e.target.value)}
+                >
+                  {environments.map((env) => (
+                    <option key={env.id} value={env.id}>
+                      {env.name} ({env.base_url})
+                    </option>
+                  ))}
+                </select>
+              </div>
+
+              <div>
+                <label className="block text-sm font-medium text-gray-400 mb-2">Browser</label>
+                <select
+                  className="input w-full"
+                  value={selectedBrowser}
+                  onChange={(e) => setSelectedBrowser(e.target.value)}
+                >
+                  <option value="chrome">Chrome</option>
+                  <option value="firefox">Firefox</option>
+                </select>
+              </div>
+
+              <div className="bg-gray-700/30 rounded p-3 text-sm">
+                <p className="text-gray-400">
+                  <strong>Viewport:</strong> {currentSession.viewport_width}×
+                  {currentSession.viewport_height}
+                </p>
+                <p className="text-gray-400">
+                  <strong>Steps:</strong> {events.length} events to replay
+                </p>
+                <p className="text-gray-400">
+                  <strong>Screenshots:</strong> {events.filter((e) => e.should_screenshot).length}{' '}
+                  marked + failures
+                </p>
+              </div>
+            </div>
+
+            <div className="flex gap-3 justify-end mt-6">
+              <button
+                onClick={() => setShowPlaybackModal(false)}
+                className="btn btn-secondary"
+                disabled={startingPlayback}
+              >
+                Cancel
+              </button>
+              <button
+                onClick={handleStartPlayback}
+                className="btn btn-primary"
+                disabled={startingPlayback || !selectedEnvId}
+              >
+                {startingPlayback ? 'Starting...' : 'Start Playback'}
+              </button>
+            </div>
+          </div>
+        </div>
+      )}
     </div>
   )
 }

@@ -12,6 +12,7 @@ from app.models.schedule import Schedule
 from app.models.test_session import TestSession, SessionStatus
 from app.models.page import Page, PageEnvironmentOverride
 from app.models.recording import RecordingSession, RecordedEvent, RecordingStatus
+from app.models.playback import PlaybackRun, PlaybackStepResult, PlaybackStatus, PlaybackStepStatus
 
 __all__ = [
     "Base",
@@ -38,4 +39,8 @@ __all__ = [
     "RecordingSession",
     "RecordedEvent",
     "RecordingStatus",
+    "PlaybackRun",
+    "PlaybackStepResult",
+    "PlaybackStatus",
+    "PlaybackStepStatus",
 ]
