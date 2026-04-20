@@ -10,6 +10,7 @@ Welcome to the Sliples documentation. This directory contains comprehensive guid
 
 ### Feature Guides
 - **[Recorder Guide](./RECORDER_GUIDE.md)** - Guide to the browser recorder snippet
+- **[Recording Quick Reference](./RECORDING_QUICK_REFERENCE.md)** - Quick lookup guide for recording workflows
 - **[Recording Sessions Feature](./RECORDINGS_FEATURE.md)** - Technical overview of the recording sessions feature
 - **[Start Recording Modal](./RECORDING_SNIPPET_FEATURE.md)** - Guide to the start recording UI and API key generation
 
@@ -29,8 +30,9 @@ Welcome to the Sliples documentation. This directory contains comprehensive guid
 ### I want to...
 
 **Record my first test**
-1. Start with [Recording User Guide - Quick Start](./RECORDING_USER_GUIDE.md#quick-start)
-2. Follow the [step-by-step recording instructions](./RECORDING_USER_GUIDE.md#step-by-step-instructions)
+1. Quick start: [Recording Quick Reference](./RECORDING_QUICK_REFERENCE.md)
+2. Full guide: [Recording User Guide - Step-by-Step](./RECORDING_USER_GUIDE.md#step-by-step-instructions)
+3. Troubleshoot: [Recording User Guide - Troubleshooting](./RECORDING_USER_GUIDE.md#troubleshooting)
 
 **Understand the platform**
 - Read the [User Guide](./USER_GUIDE.md)
@@ -50,6 +52,7 @@ Welcome to the Sliples documentation. This directory contains comprehensive guid
 |----------|---------|----------|
 | USER_GUIDE.md | Platform overview and main features | Everyone |
 | RECORDING_USER_GUIDE.md | How to record and annotate UI interactions | QA Engineers |
+| RECORDING_QUICK_REFERENCE.md | Quick lookup for recording workflows | QA Engineers, Everyone |
 | RECORDER_GUIDE.md | Browser recorder snippet reference | Developers embedding Sliples |
 | RECORDINGS_FEATURE.md | Technical design of recording system | Developers, QA |
 | RECORDING_SNIPPET_FEATURE.md | Start recording UI and API key generation | Developers, QA |
@@ -94,6 +97,7 @@ When updating documentation:
 
 - ✅ USER_GUIDE.md - Current
 - ✅ RECORDING_USER_GUIDE.md - Current (as of 2026-04-20)
+- ✅ RECORDING_QUICK_REFERENCE.md - Current (as of 2026-04-20)
 - ✅ RECORDER_GUIDE.md - Current
 - ✅ RECORDINGS_FEATURE.md - Current
 - ✅ RECORDING_SNIPPET_FEATURE.md - Current
