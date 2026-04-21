@@ -4,8 +4,12 @@ from datetime import datetime
 from typing import Optional
 from uuid import UUID
 
-from fastapi import APIRouter, Depends, HTTPException, status, Response
+import asyncio
+import json
+
+from fastapi import APIRouter, Depends, HTTPException, status, Response, WebSocket, WebSocketDisconnect
 from fastapi.responses import PlainTextResponse, FileResponse
+from redis.asyncio import Redis as AsyncRedis
 from pydantic import BaseModel, Field
 from sqlalchemy.orm import Session
 
@@ -673,6 +677,134 @@ async def get_playback_report(
 
     from fastapi.responses import HTMLResponse
     return HTMLResponse(content=run.report_html or "<html><body>Report not available</body></html>")
+
+
+# =============================================================================
+# WebSocket for live playback updates
+# =============================================================================
+
+@router.websocket("/ws/playback/{playback_id}")
+async def websocket_playback_updates(
+    websocket: WebSocket,
+    playback_id: UUID,
+):
+    """
+    WebSocket endpoint for real-time playback updates.
+
+    Connects to Redis pub/sub to receive updates from the Celery worker
+    and forwards them to the client in real-time.
+
+    Message types sent to client:
+    - "connected": Initial connection confirmation with current playback state
+    - "status": Progress update (status, current step, passed/failed counts)
+    - "step_result": Individual step completion with event details
+    - "completed": Playback finished
+    - "error": If something goes wrong
+
+    The client should send "ping" messages periodically for keepalive.
+    """
+    from app.database import SessionLocal
+    from app.services.websocket_pubsub import get_playback_channel, get_redis_async
+
+    playback_id_str = str(playback_id)
+
+    # Verify playback run exists
+    db = SessionLocal()
+    try:
+        run = db.query(PlaybackRun).filter(PlaybackRun.id == playback_id).first()
+        if not run:
+            await websocket.close(code=4004, reason="Playback run not found")
+            return
+
+        # Get current state to send on connection
+        initial_state = {
+            "id": playback_id_str,
+            "status": run.status.value,
+            "progress_message": run.progress_message,
+            "total_steps": run.total_steps,
+            "passed_steps": run.passed_steps,
+            "failed_steps": run.failed_steps,
+        }
+    finally:
+        db.close()
+
+    await websocket.accept()
+
+    # Send initial state
+    await websocket.send_json({
+        "type": "connected",
+        "data": initial_state,
+    })
+
+    # If already completed, close connection
+    if initial_state["status"] in ["passed", "failed"]:
+        await websocket.send_json({
+            "type": "completed",
+            "data": initial_state,
+        })
+        await websocket.close()
+        return
+
+    # Subscribe to Redis channel for updates
+    redis: Optional[AsyncRedis] = None
+    pubsub = None
+
+    async def redis_listener():
+        nonlocal redis, pubsub
+        try:
+            redis = await get_redis_async()
+            pubsub = redis.pubsub()
+            channel = get_playback_channel(playback_id_str)
+            await pubsub.subscribe(channel)
+
+            async for message in pubsub.listen():
+                if message["type"] == "message":
+                    try:
+                        data = json.loads(message["data"])
+                        await websocket.send_json(data)
+
+                        if data.get("type") == "completed":
+                            break
+                    except json.JSONDecodeError:
+                        pass
+                    except Exception:
+                        break
+        except asyncio.CancelledError:
+            pass
+        finally:
+            if pubsub:
+                await pubsub.unsubscribe(get_playback_channel(playback_id_str))
+                await pubsub.close()
+            if redis:
+                await redis.close()
+
+    async def keepalive_handler():
+        try:
+            while True:
+                message = await websocket.receive_text()
+                if message == "ping":
+                    await websocket.send_text("pong")
+        except WebSocketDisconnect:
+            pass
+        except asyncio.CancelledError:
+            pass
+
+    # Run both tasks concurrently
+    listener_task = asyncio.create_task(redis_listener())
+    keepalive_task = asyncio.create_task(keepalive_handler())
+
+    try:
+        done, pending = await asyncio.wait(
+            [listener_task, keepalive_task],
+            return_when=asyncio.FIRST_COMPLETED,
+        )
+        for task in pending:
+            task.cancel()
+    except Exception:
+        pass
+    finally:
+        listener_task.cancel()
+        keepalive_task.cancel()
 
 
 @router.get("/recorder/snippet.js", response_class=PlainTextResponse)

@@ -10,6 +10,7 @@ import {
   getEnvironments,
   Environment,
 } from '../api/client'
+import { usePlaybackWebSocket, PlaybackStepResult } from '../hooks'
 
 export default function RecordingDetails() {
   const { id } = useParams<{ id: string }>()
@@ -26,6 +27,36 @@ export default function RecordingDetails() {
   const [selectedBrowser, setSelectedBrowser] = useState<string>('chrome')
   const [startingPlayback, setStartingPlayback] = useState(false)
   const [playbackError, setPlaybackError] = useState<string | null>(null)
+
+  // Live playback tracking
+  const [activePlaybackId, setActivePlaybackId] = useState<string | null>(null)
+  const [liveStepResults, setLiveStepResults] = useState<PlaybackStepResult[]>([])
+
+  // WebSocket hook for live updates
+  const {
+    connectionState,
+    progressMessage: liveProgress,
+    totalSteps: liveTotalSteps,
+    currentStep: liveCurrentStep,
+    passed: livePassed,
+    failed: liveFailed,
+    isComplete: liveIsComplete,
+  } = usePlaybackWebSocket(activePlaybackId, {
+    onStepResult: (result) => {
+      setLiveStepResults((prev) => [...prev, result])
+    },
+    onComplete: () => {
+      // Refresh playback runs when complete
+      if (id) {
+        getPlaybackRuns(id).then(setPlaybackRuns)
+      }
+      // Clear active playback after a delay
+      setTimeout(() => {
+        setActivePlaybackId(null)
+        setLiveStepResults([])
+      }, 3000)
+    },
+  })
 
   useEffect(() => {
     if (id) {
@@ -68,6 +99,7 @@ export default function RecordingDetails() {
     if (!id || !selectedEnvId) return
     setStartingPlayback(true)
     setPlaybackError(null)
+    setLiveStepResults([])
     try {
       const run = await startPlayback(id, {
         environment_id: selectedEnvId,
@@ -76,6 +108,7 @@ export default function RecordingDetails() {
         viewport_height: currentSession?.viewport_height || undefined,
       })
       setPlaybackRuns([run, ...playbackRuns])
+      setActivePlaybackId(run.id) // Start WebSocket connection
       setShowPlaybackModal(false)
     } catch (e: any) {
       setPlaybackError(e.message || 'Failed to start playback')
@@ -229,6 +262,97 @@ export default function RecordingDetails() {
           </div>
         </div>
       </div>
+
+      {/* Live Playback Progress */}
+      {activePlaybackId && (
+        <div className="card border-2 border-blue-500/50 bg-blue-900/10">
+          <div className="flex items-center gap-3 mb-4">
+            <div className="w-3 h-3 bg-blue-500 rounded-full animate-pulse" />
+            <h2 className="text-xl font-semibold text-white">Live Playback</h2>
+            <span className="text-sm text-gray-400">
+              {connectionState === 'connected' ? 'Connected' : connectionState}
+            </span>
+          </div>
+
+          {/* Progress Bar */}
+          <div className="mb-4">
+            <div className="flex justify-between text-sm text-gray-400 mb-2">
+              <span>{liveProgress || 'Starting...'}</span>
+              <span>
+                {liveCurrentStep} / {liveTotalSteps} steps
+              </span>
+            </div>
+            <div className="w-full bg-gray-700 rounded-full h-3">
+              <div
+                className={`h-3 rounded-full transition-all duration-300 ${
+                  liveIsComplete
+                    ? liveFailed > 0
+                      ? 'bg-red-500'
+                      : 'bg-green-500'
+                    : 'bg-blue-500'
+                }`}
+                style={{
+                  width: `${liveTotalSteps > 0 ? (liveCurrentStep / liveTotalSteps) * 100 : 0}%`,
+                }}
+              />
+            </div>
+          </div>
+
+          {/* Stats */}
+          <div className="flex gap-6 mb-4">
+            <div className="flex items-center gap-2">
+              <span className="text-green-400 font-bold text-xl">{livePassed}</span>
+              <span className="text-gray-400 text-sm">passed</span>
+            </div>
+            <div className="flex items-center gap-2">
+              <span className="text-red-400 font-bold text-xl">{liveFailed}</span>
+              <span className="text-gray-400 text-sm">failed</span>
+            </div>
+          </div>
+
+          {/* Live Step Results */}
+          {liveStepResults.length > 0 && (
+            <div className="max-h-48 overflow-y-auto space-y-1 text-sm">
+              {liveStepResults.map((step, i) => (
+                <div
+                  key={i}
+                  className={`flex items-center gap-2 px-2 py-1 rounded ${
+                    step.status === 'passed' ? 'bg-green-900/20' : 'bg-red-900/20'
+                  }`}
+                >
+                  <span
+                    className={`w-5 h-5 flex items-center justify-center rounded text-xs ${
+                      step.status === 'passed'
+                        ? 'bg-green-600 text-white'
+                        : 'bg-red-600 text-white'
+                    }`}
+                  >
+                    {step.step_number}
+                  </span>
+                  <span className="text-gray-400">{step.event_type}</span>
+                  <span className="text-gray-200 truncate flex-1">{step.element}</span>
+                  {step.error_message && (
+                    <span className="text-red-400 text-xs truncate max-w-[200px]">
+                      {step.error_message}
+                    </span>
+                  )}
+                </div>
+              ))}
+            </div>
+          )}
+
+          {liveIsComplete && (
+            <div
+              className={`mt-4 p-3 rounded text-center ${
+                liveFailed > 0 ? 'bg-red-900/30 text-red-200' : 'bg-green-900/30 text-green-200'
+              }`}
+            >
+              Playback {liveFailed > 0 ? 'failed' : 'passed'}! {livePassed} passed, {liveFailed}{' '}
+              failed
+            </div>
+          )}
+        </div>
+      )}
 
       {/* Playback Runs */}
       {playbackRuns.length > 0 && (

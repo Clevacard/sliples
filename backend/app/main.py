@@ -19,25 +19,29 @@ class PublicCORSMiddleware(BaseHTTPMiddleware):
     """Custom middleware to add CORS headers for public endpoints."""
 
     async def dispatch(self, request, call_next):
-        # Handle CORS preflight for recorder snippet
-        if request.url.path == "/api/v1/recorder/snippet.js":
+        # Handle CORS for all recorder endpoints
+        if request.url.path.startswith("/api/v1/recorder"):
+            # Handle CORS preflight for all recorder endpoints
             if request.method == "OPTIONS":
                 return Response(
                     status_code=200,
                     headers={
                         "Access-Control-Allow-Origin": "*",
-                        "Access-Control-Allow-Methods": "GET, OPTIONS",
-                        "Access-Control-Allow-Headers": "Content-Type",
+                        "Access-Control-Allow-Methods": "GET, POST, PATCH, DELETE, OPTIONS",
+                        "Access-Control-Allow-Headers": "Content-Type, X-API-Key",
                         "Access-Control-Max-Age": "86400",
+                        "Content-Length": "0",
                     },
                 )
             response = await call_next(request)
             # Use MutableHeaders to modify response headers
             headers = MutableHeaders(response.headers)
             headers["Access-Control-Allow-Origin"] = "*"
-            headers["Access-Control-Allow-Methods"] = "GET, OPTIONS"
-            headers["Access-Control-Allow-Headers"] = "Content-Type"
-            headers["Cache-Control"] = "public, max-age=3600"
+            headers["Access-Control-Allow-Methods"] = "GET, POST, PATCH, DELETE, OPTIONS"
+            headers["Access-Control-Allow-Headers"] = "Content-Type, X-API-Key"
+            # Cache snippet for 1 hour
+            if request.url.path == "/api/v1/recorder/snippet.js":
+                headers["Cache-Control"] = "public, max-age=3600"
             return response
 
         response = await call_next(request)
@@ -62,6 +66,11 @@ app = FastAPI(
     lifespan=lifespan,
 )
 
+# Custom CORS middleware for public endpoints like recorder snippet
+# Must be added LAST (runs first - LIFO order)
+# This handles OPTIONS preflight and sets CORS headers
+app.add_middleware(PublicCORSMiddleware)
+
 # CORS middleware - for all endpoints
 # When using wildcard origins, set allow_credentials to False (CORS spec requirement)
 cors_origins = settings.cors_origins
@@ -74,11 +83,6 @@ app.add_middleware(
     allow_headers=["*"],
     expose_headers=["*"],
 )
-
-# Custom CORS middleware for public endpoints like recorder snippet
-# Must be added LAST (runs first - LIFO order)
-# This ensures wildcard origins work properly for all methods
-app.add_middleware(PublicCORSMiddleware)
 
 # Include routers
 app.include_router(projects.router, prefix="/api/v1", tags=["Projects"])

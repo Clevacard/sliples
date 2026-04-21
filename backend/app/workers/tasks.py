@@ -702,14 +702,19 @@ def execute_playback(self, playback_run_id: str):
     from app.services.playback_executor import PlaybackExecutor, run_playback
     from app.services.s3_service import S3Service
     from app.services.playback_report_generator import PlaybackReportGenerator
+    from app.services.websocket_pubsub import playback_update_publisher
 
     db = SessionLocal()
     s3_service = None
     passed_count = 0
     failed_count = 0
+    total_steps = 0
+    current_step = 0
+    events_list = []
 
-    def update_progress(message: str):
-        """Update progress message in database."""
+    def update_progress(message: str, status: str = "running"):
+        """Update progress message in database and publish to WebSocket."""
+        nonlocal passed_count, failed_count, total_steps, current_step
         try:
             run = db.query(PlaybackRun).filter(PlaybackRun.id == UUID(playback_run_id)).first()
             if run:
@@ -717,6 +722,18 @@ def execute_playback(self, playback_run_id: str):
                 run.passed_steps = passed_count
                 run.failed_steps = failed_count
                 db.commit()
+
+            # Publish to WebSocket
+            playback_update_publisher.publish_status(
+                playback_id=playback_run_id,
+                status=status,
+                progress_message=message,
+                total_steps=total_steps,
+                current_step=current_step,
+                passed=passed_count,
+                failed=failed_count,
+            )
+
             logger.info(f"[playback:{playback_run_id}] {message}")
         except Exception as e:
             logger.warning(f"Failed to update progress: {e}")
@@ -729,7 +746,7 @@ def execute_playback(self, playback_run_id: str):
             logger.error(f"Playback run {playback_run_id} not found")
             return {"success": False, "error": "Playback run not found"}
 
-        update_progress("Initializing playback...")
+        update_progress("Initializing playback...", "pending")
 
         # Update status to running
         run.status = PlaybackStatus.running
@@ -738,18 +755,20 @@ def execute_playback(self, playback_run_id: str):
 
         # Fetch recording session and events
         session = run.session
-        events = db.query(RecordedEvent).filter(
+        events_list = db.query(RecordedEvent).filter(
             RecordedEvent.session_id == session.id
         ).order_by(RecordedEvent.sequence).all()
 
-        if not events:
+        if not events_list:
             run.status = PlaybackStatus.failed
             run.finished_at = datetime.utcnow()
             run.progress_message = "No events to replay"
             db.commit()
+            playback_update_publisher.publish_error(playback_run_id, "No events to replay")
             return {"success": False, "error": "No events to replay"}
 
-        run.total_steps = len(events)
+        total_steps = len(events_list)
+        run.total_steps = total_steps
         db.commit()
 
         # Fetch environment for locale/timezone
@@ -769,17 +788,46 @@ def execute_playback(self, playback_run_id: str):
         executor = PlaybackExecutor(browser=run.browser)
         loop = asyncio.get_event_loop()
 
-        def on_step_complete(step_num, total, status, error):
-            nonlocal passed_count, failed_count
+        def on_step_complete(step_num, total, status, error, event=None):
+            nonlocal passed_count, failed_count, current_step
+            current_step = step_num
             if status == PlaybackStepStatus.passed:
                 passed_count += 1
             else:
                 failed_count += 1
-            update_progress(f"Step {step_num}/{total}: {status.value}")
+
+            # Get element description for the step
+            element_desc = "unknown"
+            event_type = "unknown"
+            if event:
+                event_type = event.event_type
+                if event.step_label:
+                    element_desc = event.step_label
+                elif event.label_text:
+                    element_desc = event.label_text
+                elif event.selector_test_id:
+                    element_desc = f"[data-testid={event.selector_test_id}]"
+                elif event.element_id:
+                    element_desc = f"#{event.element_id}"
+                elif event.tag_name:
+                    element_desc = f"<{event.tag_name}>"
+
+            # Publish step result to WebSocket
+            playback_update_publisher.publish_step_result(
+                playback_id=playback_run_id,
+                step_number=step_num,
+                event_type=event_type,
+                element=element_desc,
+                status=status.value,
+                duration_ms=0,
+                error_message=error,
+            )
+
+            update_progress(f"Step {step_num}/{total}: {event_type} on {element_desc} - {status.value}")
 
         results = loop.run_until_complete(run_playback(
             executor=executor,
-            events=events,
+            events=events_list,
             start_url=session.url,
             viewport_width=run.viewport_width or session.viewport_width or 1280,
             viewport_height=run.viewport_height or session.viewport_height or 720,
@@ -788,7 +836,7 @@ def execute_playback(self, playback_run_id: str):
             on_step_complete=on_step_complete,
         ))
 
-        update_progress("Processing results...")
+        update_progress("Processing results and generating report...")
 
         # Store step results
         for result in results:
@@ -833,7 +881,17 @@ def execute_playback(self, playback_run_id: str):
             logger.warning(f"Failed to generate report: {e}")
 
         final_status = "passed" if failed_count == 0 else "failed"
-        update_progress(f"Playback {final_status}: {passed_count} passed, {failed_count} failed")
+        update_progress(f"Playback {final_status}: {passed_count} passed, {failed_count} failed", final_status)
+
+        # Publish completion
+        playback_update_publisher.publish_completed(
+            playback_id=playback_run_id,
+            status=final_status,
+            total_steps=total_steps,
+            passed=passed_count,
+            failed=failed_count,
+            duration_ms=run.duration_ms or 0,
+        )
 
         return {
             "success": True,
@@ -853,6 +911,7 @@ def execute_playback(self, playback_run_id: str):
                 run.finished_at = datetime.utcnow()
                 run.progress_message = f"Error: {str(e)}"[:500]
                 db.commit()
+            playback_update_publisher.publish_error(playback_run_id, str(e))
         except Exception as inner_e:
             logger.warning(f"Failed to update error status: {inner_e}")
             db.rollback()

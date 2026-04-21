@@ -15,3 +15,12 @@ export {
   type WebSocketMessage,
   type ConnectionState,
 } from './useTestRunWebSocket'
+
+export {
+  usePlaybackWebSocket,
+  type UsePlaybackWebSocketReturn,
+  type UsePlaybackWebSocketOptions,
+  type PlaybackStepResult,
+  type PlaybackStatusData,
+  type PlaybackCompletedData,
+} from './usePlaybackWebSocket'

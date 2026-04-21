@@ -276,11 +276,12 @@ async def run_playback(
                 "error_message": error_msg,
                 "selector_used": selector_used,
                 "screenshot": screenshot,
+                "event": event,
             }
             results.append(result)
 
             if on_step_complete:
-                on_step_complete(i + 1, len(events), status, error_msg)
+                on_step_complete(i + 1, len(events), status, error_msg, event)
 
             # If step failed, take screenshot and continue (don't abort)
             if status == PlaybackStepStatus.failed:
