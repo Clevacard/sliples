@@ -52,6 +52,9 @@ class Settings(BaseSettings):
     # Retention
     retention_days: int = 365
 
+    # AI Diagnosis (imperson service)
+    ai_diagnosis_url: str = "https://imperson.agantis.in/api/diagnose"
+
     @property
     def cors_origins(self) -> list[str]:
         """Parse CORS origins from comma-separated string."""

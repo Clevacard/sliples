@@ -1146,6 +1146,232 @@ async def get_recorder_snippet(
     return snippet
 
 
+# =============================================================================
+# AI Diagnosis
+# =============================================================================
+
+
+class DiagnoseRequest(BaseModel):
+    """Request for AI diagnosis of a failed step."""
+    step_result_id: Optional[UUID] = None  # For playback step
+    test_result_id: Optional[UUID] = None  # For test run result
+
+
+class DiagnoseResponse(BaseModel):
+    """Response from AI diagnosis."""
+    diagnosis: str
+    suggestions: list[str]
+    confidence: Optional[float] = None
+    raw_response: Optional[dict] = None
+
+
+@router.post("/recorder/diagnose", response_model=DiagnoseResponse)
+async def diagnose_failure(
+    request: DiagnoseRequest,
+    db: Session = Depends(get_db),
+    _auth = Depends(get_api_key_or_user),
+):
+    """
+    Send failure diagnostics to AI for analysis.
+
+    Supports both playback step results and test run results.
+    Collects console logs, DOM snapshot, screenshot, and error message
+    and sends to the imperson.agantis.in service for diagnosis.
+    """
+    import httpx
+    from app.config import get_settings
+    from app.models import TestResult
+
+    settings = get_settings()
+
+    # Collect diagnostics based on request type
+    diagnostics = {
+        "error_message": None,
+        "console_logs": None,
+        "dom_snapshot": None,
+        "page_url": None,
+        "screenshot_url": None,
+        "event_type": None,
+        "selector_used": None,
+    }
+
+    if request.step_result_id:
+        # Playback step result
+        step = db.query(PlaybackStepResult).filter(
+            PlaybackStepResult.id == request.step_result_id
+        ).first()
+        if not step:
+            raise HTTPException(status_code=status.HTTP_404_NOT_FOUND, detail="Step result not found")
+
+        diagnostics["error_message"] = step.error_message
+        diagnostics["console_logs"] = step.console_logs
+        diagnostics["page_url"] = step.page_url
+        diagnostics["screenshot_url"] = step.screenshot_url
+        diagnostics["selector_used"] = step.selector_used
+
+        # Get event type from related event
+        if step.event:
+            diagnostics["event_type"] = step.event.event_type
+
+        # Load DOM snapshot from S3 if available
+        if step.dom_snapshot_url:
+            try:
+                from app.services.s3_service import S3Service
+                s3 = S3Service()
+                presigned_url = s3.get_presigned_url(step.dom_snapshot_url, expires_in=300)
+                async with httpx.AsyncClient() as client:
+                    resp = await client.get(presigned_url)
+                    if resp.status_code == 200:
+                        diagnostics["dom_snapshot"] = resp.text[:50000]  # Limit DOM size
+            except Exception as e:
+                diagnostics["dom_snapshot"] = f"[Failed to load: {e}]"
+
+    elif request.test_result_id:
+        # Test run result
+        result = db.query(TestResult).filter(
+            TestResult.id == request.test_result_id
+        ).first()
+        if not result:
+            raise HTTPException(status_code=status.HTTP_404_NOT_FOUND, detail="Test result not found")
+
+        diagnostics["error_message"] = result.error_message
+        diagnostics["console_logs"] = result.console_logs
+        diagnostics["page_url"] = result.page_url
+        diagnostics["screenshot_url"] = result.screenshot_url
+
+        # Load DOM snapshot from S3 if available
+        if result.dom_snapshot_url:
+            try:
+                from app.services.s3_service import S3Service
+                s3 = S3Service()
+                presigned_url = s3.get_presigned_url(result.dom_snapshot_url, expires_in=300)
+                async with httpx.AsyncClient() as client:
+                    resp = await client.get(presigned_url)
+                    if resp.status_code == 200:
+                        diagnostics["dom_snapshot"] = resp.text[:50000]
+            except Exception as e:
+                diagnostics["dom_snapshot"] = f"[Failed to load: {e}]"
+    else:
+        raise HTTPException(
+            status_code=status.HTTP_400_BAD_REQUEST,
+            detail="Must provide either step_result_id or test_result_id"
+        )
+
+    # Build prompt for AI
+    prompt_parts = ["Diagnose this UI test failure:\n"]
+
+    if diagnostics["error_message"]:
+        prompt_parts.append(f"Error: {diagnostics['error_message']}\n")
+
+    if diagnostics["event_type"]:
+        prompt_parts.append(f"Action type: {diagnostics['event_type']}\n")
+
+    if diagnostics["selector_used"]:
+        prompt_parts.append(f"Selector used: {diagnostics['selector_used']}\n")
+
+    if diagnostics["page_url"]:
+        prompt_parts.append(f"Page URL: {diagnostics['page_url']}\n")
+
+    if diagnostics["console_logs"]:
+        prompt_parts.append(f"\nBrowser console logs:\n{diagnostics['console_logs'][:5000]}\n")
+
+    if diagnostics["dom_snapshot"]:
+        prompt_parts.append(f"\nDOM snapshot (truncated):\n{diagnostics['dom_snapshot'][:10000]}\n")
+
+    prompt_parts.append("\nProvide a diagnosis of why this test failed and suggest fixes.")
+
+    # Call imperson API
+    payload = {
+        "prompt": "".join(prompt_parts),
+        "context": "UI automation test failure diagnosis",
+        "max_tokens": 1000,
+    }
+
+    try:
+        async with httpx.AsyncClient(timeout=60.0) as client:
+            resp = await client.post(
+                settings.ai_diagnosis_url,
+                json=payload,
+                headers={"Content-Type": "application/json"},
+            )
+
+            if resp.status_code != 200:
+                return DiagnoseResponse(
+                    diagnosis=f"AI service returned error: {resp.status_code}",
+                    suggestions=["Check if the AI service is available", "Try again later"],
+                    raw_response={"status": resp.status_code, "body": resp.text[:500]},
+                )
+
+            result = resp.json()
+
+            # Parse response - adjust based on actual imperson API response format
+            diagnosis = result.get("response") or result.get("text") or result.get("message") or str(result)
+            suggestions = result.get("suggestions", [])
+
+            # If no explicit suggestions, try to extract from diagnosis text
+            if not suggestions and "suggest" in diagnosis.lower():
+                # Simple extraction of numbered items
+                import re
+                suggestions = re.findall(r'\d+\.\s*([^\n]+)', diagnosis)
+
+            return DiagnoseResponse(
+                diagnosis=diagnosis,
+                suggestions=suggestions[:5],
+                confidence=result.get("confidence"),
+                raw_response=result,
+            )
+
+    except httpx.TimeoutException:
+        return DiagnoseResponse(
+            diagnosis="AI service timed out",
+            suggestions=["The AI service took too long to respond", "Try again or diagnose manually"],
+        )
+    except Exception as e:
+        return DiagnoseResponse(
+            diagnosis=f"Failed to contact AI service: {str(e)}",
+            suggestions=["Check network connectivity", "Verify AI service URL in configuration"],
+        )
+
+
+@router.get("/recorder/playback/{playback_id}/results/{step_id}/diagnostics")
+async def get_step_diagnostics(
+    playback_id: UUID,
+    step_id: UUID,
+    db: Session = Depends(get_db),
+    _auth = Depends(get_api_key_or_user),
+):
+    """Get detailed diagnostics for a failed playback step."""
+    step = db.query(PlaybackStepResult).filter(
+        PlaybackStepResult.id == step_id,
+        PlaybackStepResult.playback_run_id == playback_id,
+    ).first()
+
+    if not step:
+        raise HTTPException(status_code=status.HTTP_404_NOT_FOUND, detail="Step result not found")
+
+    # Build diagnostics response
+    diagnostics = {
+        "id": str(step.id),
+        "sequence": step.sequence,
+        "status": step.status.value,
+        "error_message": step.error_message,
+        "selector_used": step.selector_used,
+        "page_url": step.page_url,
+        "screenshot_url": step.screenshot_url,
+        "dom_snapshot_url": step.dom_snapshot_url,
+        "console_logs": None,
+    }
+
+    # Parse console logs JSON if present
+    if step.console_logs:
+        try:
+            diagnostics["console_logs"] = json.loads(step.console_logs)
+        except json.JSONDecodeError:
+            diagnostics["console_logs"] = step.console_logs
+
+    return diagnostics
+
+
 @router.options("/recorder/sessions")
 @router.options("/recorder/sessions/{session_id}")
 @router.options("/recorder/sessions/{session_id}/events")

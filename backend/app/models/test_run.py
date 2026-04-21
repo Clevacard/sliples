@@ -73,6 +73,12 @@ class TestResult(Base):
     duration_ms = Column(Integer, default=0)
     error_message = Column(Text, nullable=True)
     screenshot_url = Column(String(500), nullable=True)
+
+    # Failure diagnostics
+    console_logs = Column(Text, nullable=True)  # Browser console logs (JSON)
+    dom_snapshot_url = Column(String(500), nullable=True)  # S3 key for DOM HTML
+    page_url = Column(Text, nullable=True)  # Current page URL at failure
+
     created_at = Column(DateTime, default=datetime.utcnow)
 
     test_run = relationship("TestRun", back_populates="results")

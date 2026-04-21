@@ -73,10 +73,67 @@ class PlaybackExecutor:
             timezone_id=timezone_id,
         )
         self._page = await self._context.new_page()
+        self._setup_console_listener()
 
     async def take_screenshot(self) -> bytes:
         """Take a screenshot of current page."""
         return await self._page.screenshot(full_page=False)
+
+    async def get_page_url(self) -> str:
+        """Get current page URL."""
+        return self._page.url
+
+    async def get_dom_snapshot(self) -> str:
+        """Get full DOM HTML of current page."""
+        return await self._page.content()
+
+    async def get_console_logs(self) -> list[dict]:
+        """Get collected console logs."""
+        return self._console_logs.copy() if hasattr(self, '_console_logs') else []
+
+    def _setup_console_listener(self):
+        """Set up listener to capture console messages."""
+        self._console_logs = []
+
+        def on_console(msg):
+            self._console_logs.append({
+                "type": msg.type,
+                "text": msg.text,
+                "location": str(msg.location) if msg.location else None,
+            })
+
+        self._page.on("console", on_console)
+
+    async def collect_failure_diagnostics(self) -> dict:
+        """Collect all diagnostic information on failure."""
+        diagnostics = {
+            "page_url": None,
+            "console_logs": [],
+            "dom_snapshot": None,
+            "screenshot": None,
+        }
+
+        try:
+            diagnostics["page_url"] = await self.get_page_url()
+        except Exception as e:
+            logger.warning(f"Failed to get page URL: {e}")
+
+        try:
+            diagnostics["console_logs"] = await self.get_console_logs()
+        except Exception as e:
+            logger.warning(f"Failed to get console logs: {e}")
+
+        try:
+            diagnostics["dom_snapshot"] = await self.get_dom_snapshot()
+        except Exception as e:
+            logger.warning(f"Failed to get DOM snapshot: {e}")
+
+        try:
+            diagnostics["screenshot"] = await self.take_screenshot()
+        except Exception as e:
+            logger.warning(f"Failed to take screenshot: {e}")
+
+        return diagnostics
 
     async def _find_element(self, event: RecordedEvent, timeout: int = 5000) -> Optional[Locator]:
         """Try to find element using multiple selector strategies."""
@@ -118,11 +175,12 @@ class PlaybackExecutor:
         self,
         event: RecordedEvent,
         take_screenshot: bool = False,
-    ) -> tuple[PlaybackStepStatus, Optional[str], Optional[str], Optional[bytes]]:
+    ) -> tuple[PlaybackStepStatus, Optional[str], Optional[str], Optional[bytes], Optional[dict]]:
         """
         Execute a single recorded event.
 
-        Returns: (status, error_message, selector_used, screenshot_bytes)
+        Returns: (status, error_message, selector_used, screenshot_bytes, diagnostics)
+        diagnostics is only populated on failure and contains console_logs, dom_snapshot, page_url
         """
         start_time = datetime.utcnow()
         screenshot = None
@@ -202,17 +260,15 @@ class PlaybackExecutor:
             if take_screenshot:
                 screenshot = await self.take_screenshot()
 
-            return PlaybackStepStatus.passed, None, selector_used, screenshot
+            return PlaybackStepStatus.passed, None, selector_used, screenshot, None
 
         except Exception as e:
             error_msg = str(e)
             logger.error(f"Event execution failed: {error_msg}")
-            # Always take screenshot on failure
-            try:
-                screenshot = await self.take_screenshot()
-            except Exception:
-                pass
-            return PlaybackStepStatus.failed, error_msg, selector_used, screenshot
+            # Collect full diagnostics on failure
+            diagnostics = await self.collect_failure_diagnostics()
+            screenshot = diagnostics.get("screenshot")
+            return PlaybackStepStatus.failed, error_msg, selector_used, screenshot, diagnostics
 
 
 async def run_playback(
@@ -261,7 +317,7 @@ async def run_playback(
             # Determine if we should take screenshot
             take_screenshot = event.should_screenshot
 
-            status, error_msg, selector_used, screenshot = await executor.execute_event(
+            status, error_msg, selector_used, screenshot, diagnostics = await executor.execute_event(
                 event,
                 take_screenshot=take_screenshot,
             )
@@ -277,13 +333,14 @@ async def run_playback(
                 "selector_used": selector_used,
                 "screenshot": screenshot,
                 "event": event,
+                "diagnostics": diagnostics,  # Contains console_logs, dom_snapshot, page_url on failure
             }
             results.append(result)
 
             if on_step_complete:
                 on_step_complete(i + 1, len(events), status, error_msg, event)
 
-            # If step failed, take screenshot and continue (don't abort)
+            # If step failed, continue (don't abort)
             if status == PlaybackStepStatus.failed:
                 logger.warning(f"Step {event.sequence} failed, continuing...")
 

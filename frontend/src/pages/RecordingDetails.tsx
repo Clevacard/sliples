@@ -9,6 +9,10 @@ import {
   getPlaybackRuns,
   getEnvironments,
   Environment,
+  getPlaybackResults,
+  PlaybackStepResult as ApiPlaybackStepResult,
+  diagnoseFailure,
+  DiagnoseResponse,
 } from '../api/client'
 import { usePlaybackWebSocket, PlaybackStepResult } from '../hooks'
 
@@ -31,6 +35,13 @@ export default function RecordingDetails() {
   // Live playback tracking
   const [activePlaybackId, setActivePlaybackId] = useState<string | null>(null)
   const [liveStepResults, setLiveStepResults] = useState<PlaybackStepResult[]>([])
+
+  // Diagnostics modal
+  const [showDiagnosticsModal, setShowDiagnosticsModal] = useState(false)
+  const [selectedFailedStep, setSelectedFailedStep] = useState<ApiPlaybackStepResult | null>(null)
+  const [diagnosing, setDiagnosing] = useState(false)
+  const [diagnosis, setDiagnosis] = useState<DiagnoseResponse | null>(null)
+  const [failedStepsForRun, setFailedStepsForRun] = useState<ApiPlaybackStepResult[]>([])
 
   // WebSocket hook for live updates
   const {
@@ -121,6 +132,40 @@ export default function RecordingDetails() {
     if (id) {
       const runs = await getPlaybackRuns(id)
       setPlaybackRuns(runs)
+    }
+  }
+
+  const handleViewDiagnostics = async (run: PlaybackRun) => {
+    setDiagnosis(null)
+    setSelectedFailedStep(null)
+
+    try {
+      const results = await getPlaybackResults(run.id)
+      const failed = results.filter((r) => r.status === 'failed')
+      setFailedStepsForRun(failed)
+      setShowDiagnosticsModal(true)
+    } catch (e) {
+      console.error('Failed to load step results:', e)
+    }
+  }
+
+  const handleDiagnoseStep = async (step: ApiPlaybackStepResult) => {
+    setSelectedFailedStep(step)
+    setDiagnosing(true)
+    setDiagnosis(null)
+
+    try {
+      const result = await diagnoseFailure({ step_result_id: step.id })
+      setDiagnosis(result)
+    } catch (e: any) {
+      setDiagnosis({
+        diagnosis: e.message || 'Failed to get diagnosis',
+        suggestions: ['Check network connection', 'Try again later'],
+        confidence: null,
+        raw_response: null,
+      })
+    } finally {
+      setDiagnosing(false)
     }
   }
 
@@ -399,7 +444,15 @@ export default function RecordingDetails() {
                   <td className="px-4 py-3 text-gray-400 text-sm">
                     {run.started_at ? formatDate(run.started_at) : '-'}
                   </td>
-                  <td className="px-4 py-3 text-right">
+                  <td className="px-4 py-3 text-right space-x-2">
+                    {run.status === 'failed' && run.failed_steps > 0 && (
+                      <button
+                        onClick={() => handleViewDiagnostics(run)}
+                        className="btn btn-sm bg-yellow-600 hover:bg-yellow-700 text-white"
+                      >
+                        Diagnose
+                      </button>
+                    )}
                     {(run.status === 'passed' || run.status === 'failed') && (
                       <a
                         href={`/api/v1/recorder/playback/${run.id}/report`}
@@ -655,6 +708,157 @@ export default function RecordingDetails() {
                 disabled={startingPlayback || !selectedEnvId}
               >
                 {startingPlayback ? 'Starting...' : 'Start Playback'}
+              </button>
+            </div>
+          </div>
+        </div>
+      )}
+
+      {/* Diagnostics Modal */}
+      {showDiagnosticsModal && (
+        <div className="fixed inset-0 bg-black/50 flex items-center justify-center z-50 overflow-y-auto py-8">
+          <div className="bg-gray-800 rounded-lg p-6 max-w-3xl w-full mx-4 max-h-[90vh] overflow-y-auto">
+            <div className="flex items-center justify-between mb-4">
+              <h3 className="text-lg font-semibold text-white">AI Failure Diagnosis</h3>
+              <button
+                onClick={() => {
+                  setShowDiagnosticsModal(false)
+                  setDiagnosis(null)
+                  setSelectedFailedStep(null)
+                }}
+                className="text-gray-400 hover:text-white"
+              >
+                &times;
+              </button>
+            </div>
+
+            {/* Failed Steps List */}
+            <div className="mb-6">
+              <h4 className="text-sm font-medium text-gray-400 mb-3">
+                Failed Steps ({failedStepsForRun.length})
+              </h4>
+              <div className="space-y-2">
+                {failedStepsForRun.map((step) => (
+                  <div
+                    key={step.id}
+                    className={`p-3 rounded border cursor-pointer transition-colors ${
+                      selectedFailedStep?.id === step.id
+                        ? 'border-yellow-500 bg-yellow-900/20'
+                        : 'border-gray-700 bg-gray-700/30 hover:border-gray-600'
+                    }`}
+                    onClick={() => setSelectedFailedStep(step)}
+                  >
+                    <div className="flex items-center justify-between">
+                      <div>
+                        <span className="text-red-400 font-medium">Step {step.sequence}</span>
+                        {step.selector_used && (
+                          <span className="text-gray-400 ml-2 text-sm font-mono">
+                            {step.selector_used.substring(0, 50)}
+                          </span>
+                        )}
+                      </div>
+                      <button
+                        onClick={(e) => {
+                          e.stopPropagation()
+                          handleDiagnoseStep(step)
+                        }}
+                        className="btn btn-sm bg-yellow-600 hover:bg-yellow-700 text-white"
+                        disabled={diagnosing && selectedFailedStep?.id === step.id}
+                      >
+                        {diagnosing && selectedFailedStep?.id === step.id
+                          ? 'Diagnosing...'
+                          : 'Diagnose with AI'}
+                      </button>
+                    </div>
+                    {step.error_message && (
+                      <p className="text-red-300 text-sm mt-2 break-words">
+                        {step.error_message}
+                      </p>
+                    )}
+                  </div>
+                ))}
+              </div>
+            </div>
+
+            {/* Diagnosis Result */}
+            {diagnosis && (
+              <div className="border-t border-gray-700 pt-4">
+                <h4 className="text-sm font-medium text-yellow-400 mb-3">AI Diagnosis</h4>
+                <div className="bg-gray-900/50 rounded p-4 space-y-4">
+                  <div>
+                    <h5 className="text-xs font-medium text-gray-400 mb-2">Analysis</h5>
+                    <p className="text-gray-200 whitespace-pre-wrap text-sm">
+                      {diagnosis.diagnosis}
+                    </p>
+                  </div>
+
+                  {diagnosis.suggestions && diagnosis.suggestions.length > 0 && (
+                    <div>
+                      <h5 className="text-xs font-medium text-gray-400 mb-2">Suggestions</h5>
+                      <ul className="list-disc list-inside space-y-1">
+                        {diagnosis.suggestions.map((suggestion, i) => (
+                          <li key={i} className="text-green-300 text-sm">
+                            {suggestion}
+                          </li>
+                        ))}
+                      </ul>
+                    </div>
+                  )}
+
+                  {diagnosis.confidence !== null && (
+                    <div className="text-xs text-gray-500">
+                      Confidence: {Math.round(diagnosis.confidence * 100)}%
+                    </div>
+                  )}
+                </div>
+              </div>
+            )}
+
+            {/* Selected Step Details */}
+            {selectedFailedStep && !diagnosis && !diagnosing && (
+              <div className="border-t border-gray-700 pt-4">
+                <h4 className="text-sm font-medium text-gray-400 mb-3">Step Details</h4>
+                <div className="bg-gray-900/50 rounded p-4 space-y-2 text-sm">
+                  {selectedFailedStep.error_message && (
+                    <div>
+                      <span className="text-gray-500">Error: </span>
+                      <span className="text-red-300">{selectedFailedStep.error_message}</span>
+                    </div>
+                  )}
+                  {selectedFailedStep.selector_used && (
+                    <div>
+                      <span className="text-gray-500">Selector: </span>
+                      <span className="text-gray-200 font-mono text-xs">
+                        {selectedFailedStep.selector_used}
+                      </span>
+                    </div>
+                  )}
+                  {selectedFailedStep.screenshot_url && (
+                    <div>
+                      <a
+                        href={selectedFailedStep.screenshot_url}
+                        target="_blank"
+                        rel="noopener noreferrer"
+                        className="text-blue-400 hover:underline"
+                      >
+                        View Screenshot
+                      </a>
+                    </div>
+                  )}
+                </div>
+              </div>
+            )}
+
+            <div className="flex justify-end mt-6">
+              <button
+                onClick={() => {
+                  setShowDiagnosticsModal(false)
+                  setDiagnosis(null)
+                  setSelectedFailedStep(null)
+                }}
+                className="btn btn-secondary"
+              >
+                Close
               </button>
             </div>
           </div>

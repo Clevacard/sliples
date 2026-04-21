@@ -1092,3 +1092,36 @@ export async function getPlaybackResults(playbackId: string): Promise<PlaybackSt
   const response = await api.get(`/recorder/playback/${playbackId}/results`)
   return response.data
 }
+
+// Step Diagnostics (for failed steps)
+export interface StepDiagnostics {
+  id: string
+  sequence: number
+  status: string
+  error_message: string | null
+  selector_used: string | null
+  page_url: string | null
+  screenshot_url: string | null
+  dom_snapshot_url: string | null
+  console_logs: Array<{ type: string; text: string; location?: string }> | string | null
+}
+
+export interface DiagnoseResponse {
+  diagnosis: string
+  suggestions: string[]
+  confidence: number | null
+  raw_response: Record<string, unknown> | null
+}
+
+export async function getStepDiagnostics(playbackId: string, stepId: string): Promise<StepDiagnostics> {
+  const response = await api.get(`/recorder/playback/${playbackId}/results/${stepId}/diagnostics`)
+  return response.data
+}
+
+export async function diagnoseFailure(params: {
+  step_result_id?: string
+  test_result_id?: string
+}): Promise<DiagnoseResponse> {
+  const response = await api.post('/recorder/diagnose', params)
+  return response.data
+}

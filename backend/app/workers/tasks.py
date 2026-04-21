@@ -851,6 +851,33 @@ def execute_playback(self, playback_run_id: str):
                 except Exception as e:
                     logger.warning(f"Failed to upload screenshot: {e}")
 
+            # Handle diagnostics for failed steps
+            console_logs = None
+            dom_snapshot_url = None
+            page_url = None
+            diagnostics = result.get("diagnostics")
+
+            if diagnostics and result["status"] == PlaybackStepStatus.failed:
+                page_url = diagnostics.get("page_url")
+
+                # Store console logs as JSON
+                if diagnostics.get("console_logs"):
+                    import json
+                    console_logs = json.dumps(diagnostics["console_logs"])
+
+                # Upload DOM snapshot to S3
+                if diagnostics.get("dom_snapshot") and s3_service:
+                    try:
+                        dom_key = f"playback/{playback_run_id}/{result['sequence']}_dom.html"
+                        s3_service.upload_file(
+                            diagnostics["dom_snapshot"].encode('utf-8'),
+                            dom_key,
+                            content_type="text/html"
+                        )
+                        dom_snapshot_url = dom_key
+                    except Exception as e:
+                        logger.warning(f"Failed to upload DOM snapshot: {e}")
+
             step_result = PlaybackStepResult(
                 playback_run_id=run.id,
                 event_id=result["event_id"],
@@ -860,6 +887,9 @@ def execute_playback(self, playback_run_id: str):
                 error_message=result.get("error_message"),
                 selector_used=result.get("selector_used"),
                 screenshot_url=screenshot_url,
+                console_logs=console_logs,
+                dom_snapshot_url=dom_snapshot_url,
+                page_url=page_url,
             )
             db.add(step_result)
 

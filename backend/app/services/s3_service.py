@@ -90,6 +90,36 @@ class S3Service:
             logger.error(f"Failed to upload screenshot: {e}")
             raise
 
+    def upload_file(
+        self,
+        data: bytes,
+        key: str,
+        content_type: str = "application/octet-stream",
+    ) -> str:
+        """
+        Upload a generic file to S3/MinIO.
+
+        Args:
+            data: File content as bytes
+            key: S3 object key
+            content_type: MIME content type
+
+        Returns:
+            S3 object key
+        """
+        try:
+            self.client.put_object(
+                Bucket=self.bucket,
+                Key=key,
+                Body=io.BytesIO(data),
+                ContentType=content_type,
+            )
+            logger.info(f"Uploaded file to {key}")
+            return key
+        except ClientError as e:
+            logger.error(f"Failed to upload file: {e}")
+            raise
+
     def get_presigned_url(self, key: str, expires_in: int = 3600) -> str:
         """
         Generate a presigned URL for viewing a screenshot.
