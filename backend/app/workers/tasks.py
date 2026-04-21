@@ -841,22 +841,32 @@ def execute_playback(self, playback_run_id: str):
         # Store step results
         for result in results:
             screenshot_url = None
-
-            # Upload screenshot if present
-            if result.get("screenshot") and s3_service:
-                try:
-                    s3_key = f"playback/{playback_run_id}/{result['sequence']}.png"
-                    s3_service.upload_screenshot(result["screenshot"], s3_key)
-                    screenshot_url = s3_key
-                except Exception as e:
-                    logger.warning(f"Failed to upload screenshot: {e}")
-
-            # Handle diagnostics for failed steps
             console_logs = None
             dom_snapshot_url = None
             page_url = None
             diagnostics = result.get("diagnostics")
 
+            # Determine screenshot source:
+            # 1. For passed steps with should_screenshot=True, screenshot is in result["screenshot"]
+            # 2. For failed steps, screenshot is in diagnostics["screenshot"]
+            screenshot_bytes = result.get("screenshot")
+            if not screenshot_bytes and diagnostics:
+                screenshot_bytes = diagnostics.get("screenshot")
+
+            # Upload screenshot if present (either user-marked or failure)
+            if screenshot_bytes and s3_service:
+                try:
+                    s3_key = f"playback/{playback_run_id}/{result['sequence']}.png"
+                    s3_service.upload_file(
+                        screenshot_bytes,
+                        s3_key,
+                        content_type="image/png"
+                    )
+                    screenshot_url = s3_key
+                except Exception as e:
+                    logger.warning(f"Failed to upload screenshot: {e}")
+
+            # Handle additional diagnostics for failed steps
             if diagnostics and result["status"] == PlaybackStepStatus.failed:
                 page_url = diagnostics.get("page_url")
 
