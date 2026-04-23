@@ -64,6 +64,10 @@ app = FastAPI(
     description="Web UI Automation Testing Platform",
     version="0.1.0",
     lifespan=lifespan,
+    root_path="/api",
+    docs_url="/docs",
+    redoc_url="/redoc",
+    openapi_url="/openapi.json",
 )
 
 # Custom CORS middleware for public endpoints like recorder snippet
