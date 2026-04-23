@@ -114,13 +114,10 @@ async def root():
     }
 
 
-# Expose docs at /api/v1/docs so they're reachable through the /api route prefix
 from fastapi.openapi.docs import get_swagger_ui_html, get_redoc_html
-from fastapi.responses import HTMLResponse
-from fastapi.openapi.utils import get_openapi
 
 
-@app.get("/v1/docs", include_in_schema=False)
+@app.get("/api/v1/docs", include_in_schema=False)
 async def custom_swagger():
     return get_swagger_ui_html(
         openapi_url="/api/v1/openapi.json",
@@ -128,7 +125,7 @@ async def custom_swagger():
     )
 
 
-@app.get("/v1/redoc", include_in_schema=False)
+@app.get("/api/v1/redoc", include_in_schema=False)
 async def custom_redoc():
     return get_redoc_html(
         openapi_url="/api/v1/openapi.json",
@@ -136,6 +133,6 @@ async def custom_redoc():
     )
 
 
-@app.get("/v1/openapi.json", include_in_schema=False)
+@app.get("/api/v1/openapi.json", include_in_schema=False)
 async def custom_openapi():
     return app.openapi()
