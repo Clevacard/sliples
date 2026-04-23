@@ -64,10 +64,6 @@ app = FastAPI(
     description="Web UI Automation Testing Platform",
     version="0.1.0",
     lifespan=lifespan,
-    root_path="/api",
-    docs_url="/docs",
-    redoc_url="/redoc",
-    openapi_url="/openapi.json",
 )
 
 # Custom CORS middleware for public endpoints like recorder snippet
@@ -114,5 +110,32 @@ async def root():
     return {
         "name": "Sliples API",
         "version": "0.1.0",
-        "docs": "/docs",
+        "docs": "https://sliples.agantis.in/api/v1/docs",
     }
+
+
+# Expose docs at /api/v1/docs so they're reachable through the /api route prefix
+from fastapi.openapi.docs import get_swagger_ui_html, get_redoc_html
+from fastapi.responses import HTMLResponse
+from fastapi.openapi.utils import get_openapi
+
+
+@app.get("/v1/docs", include_in_schema=False)
+async def custom_swagger():
+    return get_swagger_ui_html(
+        openapi_url="/api/v1/openapi.json",
+        title="Sliples API Docs",
+    )
+
+
+@app.get("/v1/redoc", include_in_schema=False)
+async def custom_redoc():
+    return get_redoc_html(
+        openapi_url="/api/v1/openapi.json",
+        title="Sliples API Docs",
+    )
+
+
+@app.get("/v1/openapi.json", include_in_schema=False)
+async def custom_openapi():
+    return app.openapi()
