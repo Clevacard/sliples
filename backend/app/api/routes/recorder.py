@@ -1453,7 +1453,33 @@ async def get_recorder_snippet(
   }}.init();
 
   window.SliplesRecorder = SliplesRecorder;
-  console.log('[Sliples] Recorder loaded. Call SliplesRecorder.start("Test Name") to begin.');
+
+  // Auto-init: start recording automatically with OS-browser-timestamp name
+  (function autoInit() {{
+    function detectOS() {{
+      const ua = navigator.userAgent;
+      if (/Windows/.test(ua)) return 'win';
+      if (/Mac/.test(ua)) return 'mac';
+      if (/Linux/.test(ua)) return 'linux';
+      if (/Android/.test(ua)) return 'android';
+      if (/iPhone|iPad/.test(ua)) return 'ios';
+      return 'other';
+    }}
+    function detectBrowser() {{
+      const ua = navigator.userAgent;
+      if (/Edg\\//.test(ua)) return 'edge';
+      if (/Chrome\\//.test(ua)) return 'chrome';
+      if (/Firefox\\//.test(ua)) return 'firefox';
+      if (/Safari\\//.test(ua)) return 'safari';
+      return 'other';
+    }}
+    function timestamp() {{
+      const d = new Date();
+      return '' + d.getFullYear() + String(d.getMonth()+1).padStart(2,'0') + String(d.getDate()).padStart(2,'0') + String(d.getHours()).padStart(2,'0') + String(d.getMinutes()).padStart(2,'0');
+    }}
+    const name = detectOS() + '-' + detectBrowser() + '-' + timestamp();
+    SliplesRecorder.start(name);
+  }})();
 }})();
 """
     return snippet
