@@ -1134,7 +1134,7 @@ async def get_recorder_snippet(
         response.headers["Access-Control-Allow-Origin"] = "*"
         response.headers["Access-Control-Allow-Methods"] = "GET, OPTIONS"
         response.headers["Access-Control-Allow-Headers"] = "Content-Type"
-        response.headers["Cache-Control"] = "public, max-age=3600"
+        response.headers["Cache-Control"] = "no-cache, must-revalidate"
 
     auth_mode = mode or ("domain" if not api_key else "api_key")
     config = {
