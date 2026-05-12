@@ -9,7 +9,7 @@ import sqlalchemy as sa
 from sqlalchemy.dialects.postgresql import UUID
 
 
-revision = '016_add_allowed_domains_and_session_fields'
+revision = '016_allowed_domains'
 down_revision = '015_add_failure_diagnostics'
 branch_labels = None
 depends_on = None
