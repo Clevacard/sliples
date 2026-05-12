@@ -32,6 +32,8 @@ class RecordingSession(Base):
     user_agent = Column(Text, nullable=True)
     viewport_width = Column(Integer, nullable=True)
     viewport_height = Column(Integer, nullable=True)
+    domain = Column(String(255), nullable=True)
+    client_ip = Column(String(45), nullable=True)
     created_at = Column(DateTime, default=datetime.utcnow)
     stopped_at = Column(DateTime, nullable=True)
 

@@ -3,6 +3,7 @@ import { useParams, useNavigate } from 'react-router-dom'
 import { useProjectsStore } from '../store/projects'
 import { ProjectRole } from '../api/client'
 import Modal from '../components/Modal'
+import DomainManagement from '../components/DomainManagement'
 
 export default function ProjectSettings() {
   const { id } = useParams<{ id: string }>()
@@ -349,6 +350,11 @@ export default function ProjectSettings() {
             </div>
           )}
         </div>
+      </div>
+
+      {/* Domain Management */}
+      <div className="card p-6">
+        <DomainManagement projectId={id!} />
       </div>
 
       {/* Add Member Modal */}

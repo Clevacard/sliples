@@ -42,6 +42,7 @@ class Project(Base):
     api_keys = relationship("ApiKey", back_populates="project", cascade="all, delete-orphan")
     pages = relationship("Page", back_populates="project", cascade="all, delete-orphan")
     recording_sessions = relationship("RecordingSession", back_populates="project", cascade="all, delete-orphan")
+    allowed_domains = relationship("AllowedDomain", back_populates="project", cascade="all, delete-orphan")
 
     def __repr__(self) -> str:
         return f"<Project(id={self.id}, name={self.name}, slug={self.slug})>"

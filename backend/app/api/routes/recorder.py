@@ -7,15 +7,15 @@ from uuid import UUID
 import asyncio
 import json
 
-from fastapi import APIRouter, Depends, HTTPException, status, Response, WebSocket, WebSocketDisconnect
+from fastapi import APIRouter, Depends, HTTPException, status, Response, Request, WebSocket, WebSocketDisconnect
 from fastapi.responses import PlainTextResponse, FileResponse
 from redis.asyncio import Redis as AsyncRedis
 from pydantic import BaseModel, Field
 from sqlalchemy.orm import Session
 
 from app.database import get_db
-from app.models import RecordingSession, RecordedEvent, RecordingStatus, Project, ApiKey, PlaybackRun, PlaybackStepResult, PlaybackStatus, PlaybackStepStatus, Environment, BrowserConfig
-from app.api.deps import get_api_key, verify_project_access, get_validated_api_key, get_api_key_or_user
+from app.models import RecordingSession, RecordedEvent, RecordingStatus, Project, ApiKey, PlaybackRun, PlaybackStepResult, PlaybackStatus, PlaybackStepStatus, Environment, BrowserConfig, AllowedDomain
+from app.api.deps import get_api_key, verify_project_access, get_validated_api_key, get_api_key_or_user, get_domain_or_api_key_auth
 
 
 router = APIRouter()
@@ -103,12 +103,49 @@ class RecordingSessionResponse(BaseModel):
     user_agent: Optional[str]
     viewport_width: Optional[int]
     viewport_height: Optional[int]
+    domain: Optional[str] = None
+    client_ip: Optional[str] = None
     created_at: datetime
     stopped_at: Optional[datetime]
     event_count: int
 
     class Config:
         from_attributes = True
+
+
+class SessionRenameRequest(BaseModel):
+    """Request to rename a recording session."""
+    name: str = Field(..., min_length=1, max_length=255)
+
+
+class AllowedDomainCreate(BaseModel):
+    """Request to create an allowed domain."""
+    domain: str = Field(..., min_length=1, max_length=255)
+    is_enabled: bool = True
+
+
+class AllowedDomainUpdate(BaseModel):
+    """Request to update an allowed domain."""
+    domain: Optional[str] = None
+    is_enabled: Optional[bool] = None
+
+
+class AllowedDomainResponse(BaseModel):
+    """Response for an allowed domain."""
+    id: UUID
+    project_id: UUID
+    domain: str
+    is_enabled: bool
+    created_at: datetime
+    updated_at: datetime
+
+    class Config:
+        from_attributes = True
+
+
+class SessionExportRequest(BaseModel):
+    """Request to export sessions for AI analysis."""
+    session_ids: list[UUID]
 
 
 class RecordedEventResponse(BaseModel):
@@ -129,6 +166,7 @@ class RecordedEventResponse(BaseModel):
     url: Optional[str]
     coordinates: Optional[dict]
     key_info: Optional[dict]
+    extra_data: Optional[dict] = None
     # User annotations
     step_label: Optional[str]
     should_screenshot: bool
@@ -155,22 +193,34 @@ class EventMetadataUpdate(BaseModel):
 @router.post("/recorder/sessions", response_model=RecordingStartResponse, status_code=status.HTTP_201_CREATED)
 async def start_recording(
     request: RecordingStartRequest,
+    raw_request: Request = None,
     db: Session = Depends(get_db),
-    _auth = Depends(get_api_key_or_user),
-    api_key: Optional[ApiKey] = Depends(get_validated_api_key),
+    auth_info: tuple = Depends(get_domain_or_api_key_auth),
 ):
     """
     Start a new recording session.
 
+    Accepts both API key and domain-based auth (Origin header).
     Returns a session_id that should be used for all subsequent event submissions.
-    The session is automatically associated with the API key's project.
     """
-    project_id = api_key.project_id if api_key else None
+    project_id, auth_method = auth_info
+
     if not project_id:
         raise HTTPException(
             status_code=status.HTTP_400_BAD_REQUEST,
-            detail="API key must be scoped to a project to create recording sessions",
+            detail="Authentication must be scoped to a project",
         )
+
+    # Extract domain and client IP from request
+    origin = None
+    client_ip = None
+    if raw_request:
+        origin_header = raw_request.headers.get("origin") or raw_request.headers.get("referer")
+        if origin_header:
+            from urllib.parse import urlparse
+            origin = urlparse(origin_header).hostname
+        forwarded = raw_request.headers.get("x-forwarded-for", "")
+        client_ip = forwarded.split(",")[0].strip() if forwarded else (raw_request.client.host if raw_request.client else None)
 
     session = RecordingSession(
         project_id=project_id,
@@ -179,6 +229,8 @@ async def start_recording(
         user_agent=request.user_agent,
         viewport_width=request.viewport_width,
         viewport_height=request.viewport_height,
+        domain=origin,
+        client_ip=client_ip,
         status=RecordingStatus.recording,
     )
     db.add(session)
@@ -197,7 +249,7 @@ async def record_events(
     session_id: UUID,
     request: EventsBatchRequest,
     db: Session = Depends(get_db),
-    _auth = Depends(get_api_key_or_user),
+    auth_info: tuple = Depends(get_domain_or_api_key_auth),
 ):
     """
     Record a batch of UI events for a session.
@@ -246,7 +298,7 @@ async def record_events(
 async def stop_recording(
     session_id: UUID,
     db: Session = Depends(get_db),
-    _auth = Depends(get_api_key_or_user),
+    auth_info: tuple = Depends(get_domain_or_api_key_auth),
 ):
     """Stop a recording session."""
     session = db.query(RecordingSession).filter(RecordingSession.id == session_id).first()
@@ -269,6 +321,8 @@ async def stop_recording(
         user_agent=session.user_agent,
         viewport_width=session.viewport_width,
         viewport_height=session.viewport_height,
+        domain=session.domain,
+        client_ip=session.client_ip,
         created_at=session.created_at,
         stopped_at=session.stopped_at,
         event_count=event_count,
@@ -300,6 +354,8 @@ async def list_recordings(
             user_agent=session.user_agent,
             viewport_width=session.viewport_width,
             viewport_height=session.viewport_height,
+            domain=session.domain,
+            client_ip=session.client_ip,
             created_at=session.created_at,
             stopped_at=session.stopped_at,
             event_count=event_count,
@@ -329,6 +385,8 @@ async def get_recording(
         user_agent=session.user_agent,
         viewport_width=session.viewport_width,
         viewport_height=session.viewport_height,
+        domain=session.domain,
+        client_ip=session.client_ip,
         created_at=session.created_at,
         stopped_at=session.stopped_at,
         event_count=event_count,
@@ -368,6 +426,7 @@ async def get_recording_events(
             url=e.url,
             coordinates=e.coordinates,
             key_info=e.key_info,
+            extra_data=e.extra_data,
             step_label=e.step_label,
             should_screenshot=e.should_screenshot or False,
             parameters=e.parameters,
@@ -427,10 +486,46 @@ async def update_event_metadata(
         url=event.url,
         coordinates=event.coordinates,
         key_info=event.key_info,
+        extra_data=event.extra_data,
         step_label=event.step_label,
         should_screenshot=event.should_screenshot or False,
         parameters=event.parameters,
         notes=event.notes,
+    )
+
+
+@router.patch("/recorder/sessions/{session_id}", response_model=RecordingSessionResponse)
+async def rename_session(
+    session_id: UUID,
+    request: SessionRenameRequest,
+    db: Session = Depends(get_db),
+    _auth = Depends(get_api_key_or_user),
+):
+    """Rename a recording session."""
+    session = db.query(RecordingSession).filter(RecordingSession.id == session_id).first()
+    if not session:
+        raise HTTPException(status_code=status.HTTP_404_NOT_FOUND, detail="Recording session not found")
+
+    session.name = request.name
+    db.commit()
+    db.refresh(session)
+
+    event_count = db.query(RecordedEvent).filter(RecordedEvent.session_id == session_id).count()
+
+    return RecordingSessionResponse(
+        id=session.id,
+        project_id=session.project_id,
+        name=session.name,
+        url=session.url,
+        status=session.status.value,
+        user_agent=session.user_agent,
+        viewport_width=session.viewport_width,
+        viewport_height=session.viewport_height,
+        domain=session.domain,
+        client_ip=session.client_ip,
+        created_at=session.created_at,
+        stopped_at=session.stopped_at,
+        event_count=event_count,
     )
 
 
@@ -447,6 +542,213 @@ async def delete_recording(
 
     db.delete(session)
     db.commit()
+
+
+# =============================================================================
+# Session Export (AI-optimized format)
+# =============================================================================
+
+
+@router.post("/recorder/sessions/export")
+async def export_sessions(
+    request: SessionExportRequest,
+    db: Session = Depends(get_db),
+    _auth = Depends(get_api_key_or_user),
+):
+    """
+    Export one or more sessions in an AI-analysis-optimized format.
+
+    Returns a structured JSON with session metadata and a compact event log
+    designed for token-efficient LLM consumption.
+    """
+    sessions_data = []
+
+    for sid in request.session_ids:
+        session = db.query(RecordingSession).filter(RecordingSession.id == sid).first()
+        if not session:
+            continue
+
+        events = db.query(RecordedEvent).filter(
+            RecordedEvent.session_id == sid
+        ).order_by(RecordedEvent.sequence).all()
+
+        compact_events = []
+        for e in events:
+            entry = {
+                "seq": e.sequence,
+                "t": e.timestamp.isoformat(),
+                "type": e.event_type,
+            }
+            if e.url:
+                entry["url"] = e.url
+            if e.selector_test_id:
+                entry["target"] = f"[data-testid={e.selector_test_id}]"
+            elif e.selector_aria:
+                entry["target"] = f"[aria-label={e.selector_aria}]"
+            elif e.element_id:
+                entry["target"] = f"#{e.element_id}"
+            elif e.selector_css:
+                entry["target"] = e.selector_css
+            if e.value:
+                entry["value"] = e.value[:200]
+            if e.key_info:
+                entry["key"] = e.key_info
+            if e.coordinates:
+                entry["pos"] = e.coordinates
+            if e.extra_data:
+                entry["extra"] = e.extra_data
+
+            compact_events.append(entry)
+
+        sessions_data.append({
+            "id": str(session.id),
+            "name": session.name,
+            "url": session.url,
+            "domain": session.domain,
+            "user_agent": session.user_agent,
+            "viewport": f"{session.viewport_width}x{session.viewport_height}" if session.viewport_width else None,
+            "started": session.created_at.isoformat(),
+            "stopped": session.stopped_at.isoformat() if session.stopped_at else None,
+            "events": compact_events,
+        })
+
+    return {
+        "format": "sliples-session-export-v1",
+        "exported_at": datetime.utcnow().isoformat(),
+        "session_count": len(sessions_data),
+        "sessions": sessions_data,
+    }
+
+
+# =============================================================================
+# Domain Management
+# =============================================================================
+
+
+@router.get("/projects/{project_id}/domains", response_model=list[AllowedDomainResponse])
+async def list_domains(
+    project_id: UUID,
+    db: Session = Depends(get_db),
+    _auth = Depends(get_api_key_or_user),
+):
+    """List all allowed domains for a project."""
+    project = db.query(Project).filter(Project.id == project_id).first()
+    if not project:
+        raise HTTPException(status_code=status.HTTP_404_NOT_FOUND, detail="Project not found")
+
+    domains = db.query(AllowedDomain).filter(
+        AllowedDomain.project_id == project_id
+    ).order_by(AllowedDomain.created_at.desc()).all()
+
+    return domains
+
+
+@router.post("/projects/{project_id}/domains", response_model=AllowedDomainResponse, status_code=status.HTTP_201_CREATED)
+async def add_domain(
+    project_id: UUID,
+    request: AllowedDomainCreate,
+    db: Session = Depends(get_db),
+    _auth = Depends(get_api_key_or_user),
+):
+    """Add a new allowed domain to a project."""
+    project = db.query(Project).filter(Project.id == project_id).first()
+    if not project:
+        raise HTTPException(status_code=status.HTTP_404_NOT_FOUND, detail="Project not found")
+
+    existing = db.query(AllowedDomain).filter(
+        AllowedDomain.project_id == project_id,
+        AllowedDomain.domain == request.domain,
+    ).first()
+    if existing:
+        raise HTTPException(status_code=status.HTTP_409_CONFLICT, detail="Domain already exists for this project")
+
+    domain = AllowedDomain(
+        project_id=project_id,
+        domain=request.domain,
+        is_enabled=request.is_enabled,
+    )
+    db.add(domain)
+    db.commit()
+    db.refresh(domain)
+
+    return domain
+
+
+@router.patch("/projects/{project_id}/domains/{domain_id}", response_model=AllowedDomainResponse)
+async def update_domain(
+    project_id: UUID,
+    domain_id: UUID,
+    request: AllowedDomainUpdate,
+    db: Session = Depends(get_db),
+    _auth = Depends(get_api_key_or_user),
+):
+    """Update an allowed domain (edit domain name or toggle enabled)."""
+    domain = db.query(AllowedDomain).filter(
+        AllowedDomain.id == domain_id,
+        AllowedDomain.project_id == project_id,
+    ).first()
+    if not domain:
+        raise HTTPException(status_code=status.HTTP_404_NOT_FOUND, detail="Domain not found")
+
+    if request.domain is not None:
+        domain.domain = request.domain
+    if request.is_enabled is not None:
+        domain.is_enabled = request.is_enabled
+
+    db.commit()
+    db.refresh(domain)
+
+    return domain
+
+
+@router.delete("/projects/{project_id}/domains/{domain_id}", status_code=status.HTTP_204_NO_CONTENT)
+async def delete_domain(
+    project_id: UUID,
+    domain_id: UUID,
+    db: Session = Depends(get_db),
+    _auth = Depends(get_api_key_or_user),
+):
+    """Delete an allowed domain from a project."""
+    domain = db.query(AllowedDomain).filter(
+        AllowedDomain.id == domain_id,
+        AllowedDomain.project_id == project_id,
+    ).first()
+    if not domain:
+        raise HTTPException(status_code=status.HTTP_404_NOT_FOUND, detail="Domain not found")
+
+    db.delete(domain)
+    db.commit()
+
+
+@router.get("/recorder/ignored-domains")
+async def get_ignored_domains(
+    _auth = Depends(get_api_key_or_user),
+):
+    """Get all ignored domains with their request counts."""
+    import redis
+    from app.config import get_settings
+    settings = get_settings()
+    r = redis.from_url(settings.redis_url)
+    data = r.hgetall("sliples:ignored_domains")
+    r.close()
+    return [
+        {"domain": k.decode(), "count": int(v)}
+        for k, v in sorted(data.items(), key=lambda x: int(x[1]), reverse=True)
+    ]
+
+
+@router.delete("/recorder/ignored-domains/{domain}", status_code=status.HTTP_204_NO_CONTENT)
+async def dismiss_ignored_domain(
+    domain: str,
+    _auth = Depends(get_api_key_or_user),
+):
+    """Remove a domain from the ignored list."""
+    import redis
+    from app.config import get_settings
+    settings = get_settings()
+    r = redis.from_url(settings.redis_url)
+    r.hdel("sliples:ignored_domains", domain)
+    r.close()
 
 
 # =============================================================================
@@ -809,40 +1111,44 @@ async def websocket_playback_updates(
 
 @router.get("/recorder/snippet.js", response_class=PlainTextResponse)
 async def get_recorder_snippet(
-    api_key: str,
+    api_key: Optional[str] = None,
     endpoint: Optional[str] = None,
     project_id: Optional[str] = None,
+    mode: Optional[str] = None,
     response: Response = None,
 ):
     """
-    Get the recorder JavaScript snippet configured for this API key.
+    Get the recorder JavaScript snippet.
 
-    This endpoint is publicly accessible and can be embedded on any website.
-    CORS headers are set to allow cross-origin loading.
+    Supports two auth modes:
+    - api_key mode: Pass api_key param, snippet sends X-API-Key header
+    - domain mode: No api_key needed, server checks Origin header against allowed_domains
 
     Query params:
-    - api_key: Required API key for authentication
+    - api_key: API key for authentication (optional if domain mode)
     - endpoint: Optional custom API endpoint (defaults to this server)
     - project_id: Optional project ID to associate recordings with
+    - mode: "domain" for domain-based auth (no API key needed)
     """
-    # Set CORS headers to allow loading from any origin
     if response:
         response.headers["Access-Control-Allow-Origin"] = "*"
         response.headers["Access-Control-Allow-Methods"] = "GET, OPTIONS"
         response.headers["Access-Control-Allow-Headers"] = "Content-Type"
         response.headers["Cache-Control"] = "public, max-age=3600"
-    # Build the snippet with embedded configuration
+
+    auth_mode = mode or ("domain" if not api_key else "api_key")
     config = {
-        "apiKey": api_key,
+        "apiKey": api_key or "",
         "endpoint": endpoint or "/api/v1",
         "projectId": project_id,
+        "authMode": auth_mode,
     }
 
-    snippet = f"""// Sliples UI Recorder - Paste this into your browser console or inject via script tag
+    snippet = f"""// Sliples UI Recorder v2 - Domain-based auth + JS/Network error capture
 (function() {{
   'use strict';
 
-  const CONFIG = {config};
+  const CONFIG = {json.dumps(config)};
 
   const SliplesRecorder = {{
     sessionId: null,
@@ -851,19 +1157,19 @@ async def get_recorder_snippet(
     isRecording: false,
     flushInterval: null,
 
-    // Generate CSS selector for an element
+    getHeaders: function() {{
+      const h = {{'Content-Type': 'application/json'}};
+      if (CONFIG.authMode === 'api_key' && CONFIG.apiKey) h['X-API-Key'] = CONFIG.apiKey;
+      return h;
+    }},
+
     getCssSelector: function(el) {{
       if (!el || el === document.body) return 'body';
       if (el.id) return '#' + CSS.escape(el.id);
-
       const path = [];
       while (el && el !== document.body) {{
         let selector = el.tagName.toLowerCase();
-        if (el.id) {{
-          selector = '#' + CSS.escape(el.id);
-          path.unshift(selector);
-          break;
-        }}
+        if (el.id) {{ selector = '#' + CSS.escape(el.id); path.unshift(selector); break; }}
         if (el.className && typeof el.className === 'string') {{
           const classes = el.className.trim().split(/\\s+/).filter(c => c && !c.match(/^(hover|active|focus|ng-|\\d)/));
           if (classes.length) selector += '.' + classes.slice(0, 2).map(c => CSS.escape(c)).join('.');
@@ -871,10 +1177,7 @@ async def get_recorder_snippet(
         const parent = el.parentElement;
         if (parent) {{
           const siblings = Array.from(parent.children).filter(c => c.tagName === el.tagName);
-          if (siblings.length > 1) {{
-            const index = siblings.indexOf(el) + 1;
-            selector += ':nth-of-type(' + index + ')';
-          }}
+          if (siblings.length > 1) selector += ':nth-of-type(' + (siblings.indexOf(el) + 1) + ')';
         }}
         path.unshift(selector);
         el = parent;
@@ -882,42 +1185,30 @@ async def get_recorder_snippet(
       return path.join(' > ');
     }},
 
-    // Generate XPath for an element
     getXPath: function(el) {{
       if (!el) return '';
       if (el.id) return '//*[@id="' + el.id + '"]';
-
       const parts = [];
       while (el && el.nodeType === Node.ELEMENT_NODE) {{
-        let index = 1;
-        let sibling = el.previousSibling;
-        while (sibling) {{
-          if (sibling.nodeType === Node.ELEMENT_NODE && sibling.tagName === el.tagName) index++;
-          sibling = sibling.previousSibling;
-        }}
+        let index = 1, sibling = el.previousSibling;
+        while (sibling) {{ if (sibling.nodeType === Node.ELEMENT_NODE && sibling.tagName === el.tagName) index++; sibling = sibling.previousSibling; }}
         parts.unshift(el.tagName.toLowerCase() + '[' + index + ']');
         el = el.parentNode;
       }}
       return '/' + parts.join('/');
     }},
 
-    // Get associated label text
     getLabelText: function(el) {{
       if (el.labels && el.labels.length) return el.labels[0].textContent.trim();
       const ariaLabel = el.getAttribute('aria-label');
       if (ariaLabel) return ariaLabel;
       const labelledBy = el.getAttribute('aria-labelledby');
-      if (labelledBy) {{
-        const labelEl = document.getElementById(labelledBy);
-        if (labelEl) return labelEl.textContent.trim();
-      }}
-      // Check parent label
+      if (labelledBy) {{ const labelEl = document.getElementById(labelledBy); if (labelEl) return labelEl.textContent.trim(); }}
       const parentLabel = el.closest('label');
       if (parentLabel) return parentLabel.textContent.trim();
       return null;
     }},
 
-    // Extract element metadata
     getElementData: function(el) {{
       if (!el || !el.tagName) return {{}};
       return {{
@@ -937,10 +1228,8 @@ async def get_recorder_snippet(
       }};
     }},
 
-    // Record an event
     record: function(type, el, extra) {{
       if (!this.isRecording) return;
-
       const event = {{
         sequence: this.sequence++,
         timestamp: new Date().toISOString(),
@@ -949,94 +1238,141 @@ async def get_recorder_snippet(
         ...this.getElementData(el),
         ...extra,
       }};
-
       this.events.push(event);
-      console.log('[Sliples] Recorded:', type, event.selector_css || event.url);
     }},
 
-    // Flush events to server
     flush: async function() {{
       if (!this.events.length || !this.sessionId) return;
-
       const batch = this.events.splice(0, this.events.length);
       try {{
         const resp = await fetch(CONFIG.endpoint + '/recorder/sessions/' + this.sessionId + '/events', {{
           method: 'POST',
-          headers: {{
-            'Content-Type': 'application/json',
-            'X-API-Key': CONFIG.apiKey,
-          }},
+          headers: this.getHeaders(),
           body: JSON.stringify({{ events: batch }}),
         }});
-        if (!resp.ok) console.error('[Sliples] Failed to send events:', resp.status);
+        if (!resp.ok) this.events.unshift(...batch);
       }} catch (e) {{
-        console.error('[Sliples] Network error:', e);
-        // Put events back for retry
         this.events.unshift(...batch);
       }}
     }},
 
-    // Event handlers
     handleClick: function(e) {{
       const rect = e.target.getBoundingClientRect();
-      this.record('click', e.target, {{
-        coordinates: {{ x: Math.round(e.clientX - rect.left), y: Math.round(e.clientY - rect.top) }},
-      }});
+      this.record('click', e.target, {{ coordinates: {{ x: Math.round(e.clientX - rect.left), y: Math.round(e.clientY - rect.top) }} }});
     }},
 
     handleInput: function(e) {{
-      // Debounce input events - only record final value
       clearTimeout(e.target._sliplesTimeout);
       e.target._sliplesTimeout = setTimeout(() => {{
-        this.record('input', e.target, {{
-          value: e.target.type === 'password' ? '***' : e.target.value,
-        }});
+        this.record('input', e.target, {{ value: e.target.type === 'password' ? '***' : e.target.value }});
       }}, 500);
     }},
 
-    handleChange: function(e) {{
-      this.record('change', e.target, {{
-        value: e.target.value,
-      }});
-    }},
-
-    handleSubmit: function(e) {{
-      this.record('submit', e.target);
-    }},
+    handleChange: function(e) {{ this.record('change', e.target, {{ value: e.target.value }}); }},
+    handleSubmit: function(e) {{ this.record('submit', e.target); }},
 
     handleKeydown: function(e) {{
-      // Only record special keys (Enter, Tab, Escape, etc.)
       if (['Enter', 'Tab', 'Escape', 'Backspace', 'Delete'].includes(e.key) || e.ctrlKey || e.metaKey) {{
-        this.record('keydown', e.target, {{
-          key_info: {{
-            key: e.key,
-            code: e.code,
-            ctrl: e.ctrlKey,
-            alt: e.altKey,
-            shift: e.shiftKey,
-            meta: e.metaKey,
-          }},
-        }});
+        this.record('keydown', e.target, {{ key_info: {{ key: e.key, code: e.code, ctrl: e.ctrlKey, alt: e.altKey, shift: e.shiftKey, meta: e.metaKey }} }});
       }}
     }},
 
-    // Start recording
+    // JS error and network error capture
+    setupErrorCapture: function() {{
+      // JS exceptions
+      this._onError = (event) => {{
+        this.record('js_error', null, {{
+          extra_data: {{
+            message: event.message,
+            filename: event.filename,
+            lineno: event.lineno,
+            colno: event.colno,
+            stack: event.error ? event.error.stack : null,
+          }}
+        }});
+      }};
+      window.addEventListener('error', this._onError);
+
+      // Unhandled promise rejections
+      this._onUnhandledRejection = (event) => {{
+        this.record('js_error', null, {{
+          extra_data: {{
+            message: 'Unhandled Promise Rejection',
+            reason: event.reason ? (event.reason.message || String(event.reason)) : 'unknown',
+            stack: event.reason && event.reason.stack ? event.reason.stack : null,
+          }}
+        }});
+      }};
+      window.addEventListener('unhandledrejection', this._onUnhandledRejection);
+
+      // Network error capture via fetch monkey-patch
+      const origFetch = window.fetch;
+      const self = this;
+      window.fetch = function() {{
+        const url = arguments[0] instanceof Request ? arguments[0].url : String(arguments[0]);
+        // Skip our own requests
+        if (url.includes('/recorder/sessions/')) return origFetch.apply(this, arguments);
+        return origFetch.apply(this, arguments).then(resp => {{
+          if (!resp.ok && resp.status >= 400) {{
+            self.record('network_error', null, {{
+              extra_data: {{ url: url, status: resp.status, statusText: resp.statusText, method: (arguments[1] && arguments[1].method) || 'GET' }}
+            }});
+          }}
+          return resp;
+        }}).catch(err => {{
+          self.record('network_error', null, {{
+            extra_data: {{ url: url, error: err.message, method: (arguments[1] && arguments[1].method) || 'GET' }}
+          }});
+          throw err;
+        }});
+      }};
+      this._origFetch = origFetch;
+
+      // XHR error capture
+      const origXHROpen = XMLHttpRequest.prototype.open;
+      const origXHRSend = XMLHttpRequest.prototype.send;
+      XMLHttpRequest.prototype.open = function(method, url) {{
+        this._sliplesMethod = method;
+        this._sliplesUrl = url;
+        return origXHROpen.apply(this, arguments);
+      }};
+      XMLHttpRequest.prototype.send = function() {{
+        const xhr = this;
+        xhr.addEventListener('loadend', function() {{
+          if (xhr._sliplesUrl && !xhr._sliplesUrl.includes('/recorder/sessions/') && xhr.status >= 400) {{
+            self.record('network_error', null, {{
+              extra_data: {{ url: xhr._sliplesUrl, status: xhr.status, statusText: xhr.statusText, method: xhr._sliplesMethod }}
+            }});
+          }}
+        }});
+        xhr.addEventListener('error', function() {{
+          if (xhr._sliplesUrl && !xhr._sliplesUrl.includes('/recorder/sessions/')) {{
+            self.record('network_error', null, {{
+              extra_data: {{ url: xhr._sliplesUrl, error: 'Network error', method: xhr._sliplesMethod }}
+            }});
+          }}
+        }});
+        return origXHRSend.apply(this, arguments);
+      }};
+      this._origXHROpen = origXHROpen;
+      this._origXHRSend = origXHRSend;
+    }},
+
+    teardownErrorCapture: function() {{
+      window.removeEventListener('error', this._onError);
+      window.removeEventListener('unhandledrejection', this._onUnhandledRejection);
+      if (this._origFetch) window.fetch = this._origFetch;
+      if (this._origXHROpen) XMLHttpRequest.prototype.open = this._origXHROpen;
+      if (this._origXHRSend) XMLHttpRequest.prototype.send = this._origXHRSend;
+    }},
+
     start: async function(name) {{
-      if (this.isRecording) {{
-        console.warn('[Sliples] Already recording');
-        return;
-      }}
-
+      if (this.isRecording) return;
       const sessionName = name || 'Recording ' + new Date().toLocaleString();
-
       try {{
-        const url = CONFIG.endpoint + '/recorder/sessions' + (CONFIG.projectId ? '?project_id=' + CONFIG.projectId : '');
-        const resp = await fetch(url, {{
+        const resp = await fetch(CONFIG.endpoint + '/recorder/sessions', {{
           method: 'POST',
-          headers: {{
-            'Content-Type': 'application/json',
-            'X-API-Key': CONFIG.apiKey,
-          }},
+          headers: this.getHeaders(),
           body: JSON.stringify({{
             name: sessionName,
             url: window.location.href,
@@ -1045,23 +1381,19 @@ async def get_recorder_snippet(
             viewport_height: window.innerHeight,
           }}),
         }});
-
         if (!resp.ok) throw new Error('Failed to start session: ' + resp.status);
-
         const data = await resp.json();
         this.sessionId = data.session_id;
         this.isRecording = true;
         this.sequence = 0;
         this.events = [];
 
-        // Attach listeners
         document.addEventListener('click', this._handleClick, true);
         document.addEventListener('input', this._handleInput, true);
         document.addEventListener('change', this._handleChange, true);
         document.addEventListener('submit', this._handleSubmit, true);
         document.addEventListener('keydown', this._handleKeydown, true);
 
-        // Record navigation events
         this._navObserver = new MutationObserver(() => {{
           if (this._lastUrl !== window.location.href) {{
             this._lastUrl = window.location.href;
@@ -1071,62 +1403,45 @@ async def get_recorder_snippet(
         this._navObserver.observe(document.body, {{ childList: true, subtree: true }});
         this._lastUrl = window.location.href;
 
-        // Flush periodically
+        this.setupErrorCapture();
         this.flushInterval = setInterval(() => this.flush(), 3000);
 
         console.log('[Sliples] Recording started. Session:', this.sessionId);
-        console.log('[Sliples] Call SliplesRecorder.stop() to finish');
-
       }} catch (e) {{
         console.error('[Sliples] Failed to start recording:', e);
       }}
     }},
 
-    // Stop recording
     stop: async function() {{
-      if (!this.isRecording) {{
-        console.warn('[Sliples] Not recording');
-        return;
-      }}
-
+      if (!this.isRecording) return;
       this.isRecording = false;
 
-      // Remove listeners
       document.removeEventListener('click', this._handleClick, true);
       document.removeEventListener('input', this._handleInput, true);
       document.removeEventListener('change', this._handleChange, true);
       document.removeEventListener('submit', this._handleSubmit, true);
       document.removeEventListener('keydown', this._handleKeydown, true);
-
       if (this._navObserver) this._navObserver.disconnect();
+      this.teardownErrorCapture();
       clearInterval(this.flushInterval);
 
-      // Final flush
       await this.flush();
 
-      // Stop session on server
       try {{
         const resp = await fetch(CONFIG.endpoint + '/recorder/sessions/' + this.sessionId + '/stop', {{
           method: 'POST',
-          headers: {{ 'X-API-Key': CONFIG.apiKey }},
+          headers: this.getHeaders(),
         }});
-
         if (resp.ok) {{
           const data = await resp.json();
           console.log('[Sliples] Recording stopped. Events:', data.event_count);
-          console.log('[Sliples] View at: ' + CONFIG.endpoint.replace('/api/v1', '') + '/recordings/' + this.sessionId);
-        }} else {{
-          const errText = await resp.text();
-          console.error('[Sliples] Failed to stop recording. Status:', resp.status, errText);
         }}
       }} catch (e) {{
         console.error('[Sliples] Failed to stop recording:', e);
       }}
-
       this.sessionId = null;
     }},
 
-    // Initialize bound handlers
     init: function() {{
       this._handleClick = this.handleClick.bind(this);
       this._handleInput = this.handleInput.bind(this);
@@ -1137,10 +1452,8 @@ async def get_recorder_snippet(
     }},
   }}.init();
 
-  // Expose globally
   window.SliplesRecorder = SliplesRecorder;
-
-  console.log('[Sliples] Recorder loaded. Call SliplesRecorder.start("Test Name") to begin recording.');
+  console.log('[Sliples] Recorder loaded. Call SliplesRecorder.start("Test Name") to begin.');
 }})();
 """
     return snippet

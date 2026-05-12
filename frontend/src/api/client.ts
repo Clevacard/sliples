@@ -966,9 +966,20 @@ export interface RecordingSession {
   user_agent?: string
   viewport_width?: number
   viewport_height?: number
+  domain?: string
+  client_ip?: string
   created_at: string
   stopped_at?: string
   event_count: number
+}
+
+export interface AllowedDomain {
+  id: string
+  project_id: string
+  domain: string
+  is_enabled: boolean
+  created_at: string
+  updated_at: string
 }
 
 export interface RecordedEvent {
@@ -995,6 +1006,7 @@ export interface RecordedEvent {
     shift: boolean
     meta: boolean
   }
+  extra_data?: Record<string, unknown>
   step_label?: string
   should_screenshot?: boolean
   parameters?: Record<string, string>
@@ -1034,6 +1046,50 @@ export async function updateEventMetadata(
 
 export async function deleteRecordingSession(sessionId: string): Promise<void> {
   await api.delete(`/recorder/sessions/${sessionId}`)
+}
+
+export async function renameRecordingSession(sessionId: string, name: string): Promise<RecordingSession> {
+  const response = await api.patch(`/recorder/sessions/${sessionId}`, { name })
+  return response.data
+}
+
+export async function exportSessions(sessionIds: string[]): Promise<unknown> {
+  const response = await api.post('/recorder/sessions/export', { session_ids: sessionIds })
+  return response.data
+}
+
+// Domain management
+export async function listDomains(projectId: string): Promise<AllowedDomain[]> {
+  const response = await api.get(`/projects/${projectId}/domains`)
+  return response.data
+}
+
+export async function addDomain(projectId: string, domain: string, isEnabled = true): Promise<AllowedDomain> {
+  const response = await api.post(`/projects/${projectId}/domains`, { domain, is_enabled: isEnabled })
+  return response.data
+}
+
+export async function updateDomain(projectId: string, domainId: string, data: { domain?: string; is_enabled?: boolean }): Promise<AllowedDomain> {
+  const response = await api.patch(`/projects/${projectId}/domains/${domainId}`, data)
+  return response.data
+}
+
+export async function deleteDomain(projectId: string, domainId: string): Promise<void> {
+  await api.delete(`/projects/${projectId}/domains/${domainId}`)
+}
+
+export interface IgnoredDomain {
+  domain: string
+  count: number
+}
+
+export async function getIgnoredDomains(): Promise<IgnoredDomain[]> {
+  const response = await api.get('/recorder/ignored-domains')
+  return response.data
+}
+
+export async function dismissIgnoredDomain(domain: string): Promise<void> {
+  await api.delete(`/recorder/ignored-domains/${encodeURIComponent(domain)}`)
 }
 
 // Playback types and functions

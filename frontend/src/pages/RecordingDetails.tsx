@@ -1,4 +1,4 @@
-import { useEffect, useState } from 'react'
+import { useEffect, useState, Fragment } from 'react'
 import { useParams, useNavigate } from 'react-router-dom'
 import { useRecordingsStore } from '../store/recordings'
 import EditEventModal from '../components/EditEventModal'
@@ -13,6 +13,8 @@ import {
   PlaybackStepResult as ApiPlaybackStepResult,
   diagnoseFailure,
   DiagnoseResponse,
+  renameRecordingSession,
+  exportSessions,
 } from '../api/client'
 import { usePlaybackWebSocket, PlaybackStepResult } from '../hooks'
 
@@ -35,6 +37,10 @@ export default function RecordingDetails() {
   // Live playback tracking
   const [activePlaybackId, setActivePlaybackId] = useState<string | null>(null)
   const [liveStepResults, setLiveStepResults] = useState<PlaybackStepResult[]>([])
+
+  // Session rename
+  const [isEditingName, setIsEditingName] = useState(false)
+  const [editName, setEditName] = useState('')
 
   // Diagnostics modal
   const [showDiagnosticsModal, setShowDiagnosticsModal] = useState(false)
@@ -169,6 +175,29 @@ export default function RecordingDetails() {
     }
   }
 
+  const handleRename = async () => {
+    if (!id || !editName.trim()) return
+    try {
+      await renameRecordingSession(id, editName.trim())
+      fetchSessionDetails(id)
+      setIsEditingName(false)
+    } catch (e) {
+      console.error('Failed to rename:', e)
+    }
+  }
+
+  const handleExportSingle = async () => {
+    if (!id) return
+    const data = await exportSessions([id])
+    const blob = new Blob([JSON.stringify(data, null, 2)], { type: 'application/json' })
+    const url = URL.createObjectURL(blob)
+    const a = document.createElement('a')
+    a.href = url
+    a.download = `session-${id.slice(0, 8)}.json`
+    a.click()
+    URL.revokeObjectURL(url)
+  }
+
   if (isLoading) {
     return (
       <div className="space-y-4">
@@ -215,12 +244,26 @@ export default function RecordingDetails() {
         return 'badge-primary'
       case 'keydown':
         return 'badge'
+      case 'js_error':
+        return 'bg-red-700 text-red-100'
+      case 'network_error':
+        return 'bg-orange-700 text-orange-100'
       default:
         return 'badge'
     }
   }
 
   const getElementDisplay = (event: RecordedEvent) => {
+    if (event.event_type === 'js_error' && event.extra_data) {
+      return (event.extra_data.message as string) || 'JS Error'
+    }
+    if (event.event_type === 'network_error' && event.extra_data) {
+      const ed = event.extra_data
+      const method = (ed.method as string) || 'GET'
+      const url = (ed.url as string) || ''
+      const status = ed.status ? ` [${ed.status}]` : ''
+      return `${method} ${url.substring(0, 60)}${status}`
+    }
     if (event.step_label) return event.step_label
     if (event.label_text) return event.label_text
     if (event.element_id) return `#${event.element_id}`
@@ -258,10 +301,42 @@ export default function RecordingDetails() {
       <div className="card">
         <div className="flex items-start justify-between mb-4">
           <div>
-            <h1 className="text-3xl font-bold text-white mb-1">{currentSession.name}</h1>
+            {isEditingName ? (
+              <div className="flex items-center gap-2 mb-1">
+                <input
+                  type="text"
+                  className="input text-xl font-bold"
+                  value={editName}
+                  onChange={(e) => setEditName(e.target.value)}
+                  onKeyDown={(e) => { if (e.key === 'Enter') handleRename(); if (e.key === 'Escape') setIsEditingName(false); }}
+                  autoFocus
+                />
+                <button onClick={handleRename} className="btn btn-sm btn-primary">Save</button>
+                <button onClick={() => setIsEditingName(false)} className="btn btn-sm btn-secondary">Cancel</button>
+              </div>
+            ) : (
+              <h1
+                className="text-3xl font-bold text-white mb-1 cursor-pointer hover:text-blue-300"
+                onClick={() => { setEditName(currentSession.name); setIsEditingName(true); }}
+                title="Click to rename"
+              >
+                {currentSession.name}
+              </h1>
+            )}
             <p className="text-gray-400 text-sm truncate">{currentSession.url}</p>
+            {currentSession.domain && (
+              <p className="text-gray-500 text-xs mt-1">
+                Domain: {currentSession.domain} {currentSession.client_ip && `| IP: ${currentSession.client_ip}`}
+              </p>
+            )}
           </div>
           <div className="flex items-center gap-3">
+            <button
+              onClick={handleExportSingle}
+              className="btn bg-purple-600 hover:bg-purple-700 text-white"
+            >
+              Export
+            </button>
             <button
               onClick={() => setShowPlaybackModal(true)}
               className="btn btn-primary"
@@ -471,150 +546,113 @@ export default function RecordingDetails() {
         </div>
       )}
 
-      {/* Events List */}
+      {/* Events Table (Compact) */}
       <div className="card">
-        <h2 className="text-xl font-semibold text-white mb-4">Recorded Events</h2>
+        <h2 className="text-xl font-semibold text-white mb-4">
+          Recorded Events <span className="text-sm text-gray-400 font-normal">({events.length})</span>
+        </h2>
         {events.length > 0 ? (
-          <div className="space-y-3">
-            {events.map((event) => (
-              <div key={event.id} className="bg-gray-700/20 rounded-lg">
-                <button
-                  onClick={() => setExpandedEventId(expandedEventId === event.id ? null : event.id)}
-                  className="w-full text-left flex items-center justify-between hover:bg-gray-700/30 p-4 rounded-lg"
-                >
-                  <div className="flex items-center gap-4 flex-1">
-                    <div className="w-8 h-8 bg-gray-700 rounded flex items-center justify-center text-xs text-gray-300 font-semibold">
-                      {event.sequence}
-                    </div>
-                    <div className="flex-1">
-                      <div className="flex items-center gap-3">
-                        <span className={`badge ${getEventTypeBadgeClass(event.event_type)}`}>
+          <div className="overflow-x-auto">
+            <table className="w-full table-dark text-sm">
+              <thead>
+                <tr className="border-b border-gray-700">
+                  <th className="text-left px-3 py-2 text-gray-400 w-10">#</th>
+                  <th className="text-left px-3 py-2 text-gray-400">Type</th>
+                  <th className="text-left px-3 py-2 text-gray-400">Target</th>
+                  <th className="text-left px-3 py-2 text-gray-400">Value</th>
+                  <th className="text-left px-3 py-2 text-gray-400 w-16">Time</th>
+                  <th className="text-right px-3 py-2 text-gray-400 w-8"></th>
+                </tr>
+              </thead>
+              <tbody>
+                {events.map((event) => (
+                  <Fragment key={event.id}>
+                    <tr
+                      className={`border-b border-gray-700/50 hover:bg-gray-700/30 cursor-pointer ${expandedEventId === event.id ? 'bg-gray-700/20' : ''}`}
+                      onClick={() => setExpandedEventId(expandedEventId === event.id ? null : event.id)}
+                    >
+                      <td className="px-3 py-2 text-gray-500 font-mono text-xs">{event.sequence}</td>
+                      <td className="px-3 py-2">
+                        <span className={`badge text-xs ${getEventTypeBadgeClass(event.event_type)}`}>
                           {event.event_type}
                         </span>
-                        <span className="text-gray-200 font-medium">{getElementDisplay(event)}</span>
-                        {event.should_screenshot && (
-                          <span className="text-xs bg-blue-900/30 text-blue-300 px-2 py-1 rounded">
-                            Screenshot
-                          </span>
-                        )}
-                        {event.parameters && Object.keys(event.parameters).length > 0 && (
-                          <span className="text-xs bg-green-900/30 text-green-300 px-2 py-1 rounded">
-                            {Object.keys(event.parameters).length} param(s)
-                          </span>
-                        )}
-                      </div>
-                      <div className="flex items-center gap-4 text-xs text-gray-500 mt-2">
-                        <span>{formatDate(event.timestamp)}</span>
-                        {event.value && <span>Value: {event.value.substring(0, 50)}</span>}
-                        {event.selector_test_id && <span>ID: {event.selector_test_id}</span>}
-                      </div>
-                    </div>
-                  </div>
-                  <div className="text-gray-400">{expandedEventId === event.id ? '▼' : '▶'}</div>
-                </button>
-
-                {/* Expanded Details */}
-                {expandedEventId === event.id && (
-                  <div className="border-t border-gray-700 mx-4 mb-4 pt-4 space-y-4">
-                    {/* Event Type & Value */}
-                    <div>
-                      <h4 className="text-sm font-semibold text-gray-300 mb-2">Event Details</h4>
-                      <div className="space-y-2 text-sm">
-                        <div>
-                          <span className="text-gray-500">Type:</span>
-                          <span className="text-gray-200 ml-2">{event.event_type}</span>
-                        </div>
-                        {event.value && (
-                          <div>
-                            <span className="text-gray-500">Value:</span>
-                            <span className="text-gray-200 ml-2 font-mono">{event.value}</span>
-                          </div>
-                        )}
-                        {event.coordinates && (
-                          <div>
-                            <span className="text-gray-500">Coordinates:</span>
-                            <span className="text-gray-200 ml-2">
-                              x: {event.coordinates.x}, y: {event.coordinates.y}
-                            </span>
-                          </div>
-                        )}
-                      </div>
-                    </div>
-
-                    {/* Element Info */}
-                    <div>
-                      <h4 className="text-sm font-semibold text-gray-300 mb-2">Element</h4>
-                      <div className="space-y-2 text-sm">
-                        {event.selector_css && (
-                          <div>
-                            <span className="text-gray-500">CSS:</span>
-                            <span className="text-gray-200 ml-2 font-mono text-xs break-all">
-                              {event.selector_css}
-                            </span>
-                          </div>
-                        )}
-                        {event.selector_test_id && (
-                          <div>
-                            <span className="text-gray-500">Test ID:</span>
-                            <span className="text-gray-200 ml-2 font-mono">{event.selector_test_id}</span>
-                          </div>
-                        )}
-                        {event.label_text && (
-                          <div>
-                            <span className="text-gray-500">Label:</span>
-                            <span className="text-gray-200 ml-2">{event.label_text}</span>
-                          </div>
-                        )}
-                      </div>
-                    </div>
-
-                    {/* User Annotations */}
-                    <div className="bg-gray-700/20 rounded p-3">
-                      <h4 className="text-sm font-semibold text-gray-300 mb-2">Annotations</h4>
-                      <div className="space-y-2 text-sm">
-                        {event.step_label && (
-                          <div>
-                            <span className="text-gray-500">Step Label:</span>
-                            <span className="text-blue-300 ml-2">{event.step_label}</span>
-                          </div>
-                        )}
-                        {event.should_screenshot && (
-                          <div className="text-green-300">✓ Mark for screenshot</div>
-                        )}
-                        {event.parameters && Object.keys(event.parameters).length > 0 && (
-                          <div>
-                            <span className="text-gray-500">Parameters:</span>
-                            <div className="mt-1 space-y-1 ml-4">
-                              {Object.entries(event.parameters).map(([key, value]) => (
-                                <div key={key} className="font-mono text-xs text-green-300">
-                                  {key} = ${'{'}
-                                  {value}
-                                  {'}'}
+                      </td>
+                      <td className="px-3 py-2 text-gray-200 truncate max-w-[300px]" title={event.selector_css || ''}>
+                        {getElementDisplay(event)}
+                      </td>
+                      <td className="px-3 py-2 text-gray-400 truncate max-w-[200px] font-mono text-xs">
+                        {event.event_type === 'js_error' && event.extra_data
+                          ? (event.extra_data.filename ? `${(event.extra_data.filename as string).split('/').pop()}:${event.extra_data.lineno}` : '')
+                          : event.event_type === 'network_error' && event.extra_data
+                            ? (event.extra_data.status ? `${event.extra_data.status}` : (event.extra_data.error as string || ''))
+                            : (event.value?.substring(0, 40) || (event.key_info ? event.key_info.key : ''))}
+                      </td>
+                      <td className="px-3 py-2 text-gray-500 text-xs">
+                        {new Date(event.timestamp).toLocaleTimeString()}
+                      </td>
+                      <td className="px-3 py-2 text-right">
+                        {event.should_screenshot && <span className="text-blue-400 text-xs">&#128247;</span>}
+                      </td>
+                    </tr>
+                    {expandedEventId === event.id && (
+                      <tr key={`${event.id}-detail`}>
+                        <td colSpan={6} className="px-3 py-3 bg-gray-800/50">
+                          {/* Error event details */}
+                          {event.event_type === 'js_error' && event.extra_data && (
+                            <div className="space-y-2 text-xs mb-3">
+                              <div><span className="text-red-400 font-medium">JS Error:</span> <span className="text-gray-200">{String(event.extra_data.message || '')}</span></div>
+                              {!!event.extra_data.reason && <div><span className="text-gray-500">Reason:</span> <span className="text-gray-300">{String(event.extra_data.reason)}</span></div>}
+                              {!!event.extra_data.filename && (
+                                <div><span className="text-gray-500">Source:</span> <span className="text-gray-300 font-mono">{String(event.extra_data.filename)}:{String(event.extra_data.lineno)}:{String(event.extra_data.colno)}</span></div>
+                              )}
+                              {!!event.extra_data.stack && (
+                                <div>
+                                  <span className="text-gray-500">Stack:</span>
+                                  <pre className="mt-1 p-2 bg-gray-900 rounded text-gray-300 font-mono text-xs overflow-x-auto max-h-40 overflow-y-auto whitespace-pre-wrap">{String(event.extra_data.stack)}</pre>
                                 </div>
-                              ))}
+                              )}
                             </div>
-                          </div>
-                        )}
-                        {event.notes && (
-                          <div>
-                            <span className="text-gray-500">Notes:</span>
-                            <p className="text-gray-200 ml-2 mt-1 text-xs">{event.notes}</p>
-                          </div>
-                        )}
-                      </div>
-                    </div>
-
-                    {/* Edit Button */}
-                    <button
-                      onClick={() => setEditingEvent(event)}
-                      className="w-full btn btn-sm bg-blue-600 hover:bg-blue-700 text-white"
-                    >
-                      Edit Annotations
-                    </button>
-                  </div>
-                )}
-              </div>
-            ))}
+                          )}
+                          {event.event_type === 'network_error' && event.extra_data && (
+                            <div className="space-y-1 text-xs mb-3">
+                              <div><span className="text-orange-400 font-medium">Network Error:</span> <span className="text-gray-200">{String(event.extra_data.method || 'GET')} {String(event.extra_data.url || '')}</span></div>
+                              {!!event.extra_data.status && <div><span className="text-gray-500">Status:</span> <span className="text-gray-300">{String(event.extra_data.status)} {String(event.extra_data.statusText || '')}</span></div>}
+                              {!!event.extra_data.error && <div><span className="text-gray-500">Error:</span> <span className="text-red-300">{String(event.extra_data.error)}</span></div>}
+                            </div>
+                          )}
+                          {/* Standard element details */}
+                          {event.event_type !== 'js_error' && event.event_type !== 'network_error' && (
+                            <div className="grid grid-cols-2 gap-4 text-xs">
+                              <div className="space-y-1">
+                                {event.selector_css && <div><span className="text-gray-500">CSS:</span> <span className="text-gray-300 font-mono">{event.selector_css}</span></div>}
+                                {event.selector_test_id && <div><span className="text-gray-500">Test ID:</span> <span className="text-gray-300 font-mono">{event.selector_test_id}</span></div>}
+                                {event.selector_aria && <div><span className="text-gray-500">Aria:</span> <span className="text-gray-300">{event.selector_aria}</span></div>}
+                                {event.label_text && <div><span className="text-gray-500">Label:</span> <span className="text-gray-300">{event.label_text}</span></div>}
+                                {event.url && <div><span className="text-gray-500">URL:</span> <span className="text-gray-300 truncate">{event.url}</span></div>}
+                              </div>
+                              <div className="space-y-1">
+                                {event.coordinates && <div><span className="text-gray-500">Position:</span> <span className="text-gray-300">({event.coordinates.x}, {event.coordinates.y})</span></div>}
+                                {event.step_label && <div><span className="text-gray-500">Label:</span> <span className="text-blue-300">{event.step_label}</span></div>}
+                                {event.notes && <div><span className="text-gray-500">Notes:</span> <span className="text-gray-300">{event.notes}</span></div>}
+                              </div>
+                            </div>
+                          )}
+                          {event.url && (event.event_type === 'js_error' || event.event_type === 'network_error') && (
+                            <div className="text-xs mt-1"><span className="text-gray-500">Page:</span> <span className="text-gray-400">{event.url}</span></div>
+                          )}
+                          <button
+                            onClick={(e) => { e.stopPropagation(); setEditingEvent(event); }}
+                            className="btn btn-sm bg-blue-600 hover:bg-blue-700 text-white mt-2"
+                          >
+                            Edit
+                          </button>
+                        </td>
+                      </tr>
+                    )}
+                  </Fragment>
+                ))}
+              </tbody>
+            </table>
           </div>
         ) : (
           <div className="text-center py-12">

@@ -8,7 +8,7 @@ from sqlalchemy.orm import Session
 import bcrypt
 
 from app.database import get_db
-from app.models import ApiKey, User, Project, ProjectMember, ProjectRole, UserRole
+from app.models import ApiKey, User, Project, ProjectMember, ProjectRole, UserRole, AllowedDomain
 
 
 async def get_api_key(
@@ -409,6 +409,79 @@ def get_user_project_role(
     ).first()
 
     return membership.role if membership else None
+
+
+async def get_domain_or_api_key_auth(
+    request: Request,
+    x_api_key: Optional[str] = Header(None, alias="X-API-Key"),
+    db: Session = Depends(get_db),
+) -> tuple:
+    """
+    Authenticate via Origin header (domain-based) or API key.
+
+    For domain-based auth, checks the Origin header against allowed_domains.
+    Returns (project_id, auth_method) tuple.
+    auth_method is "domain" or "api_key".
+
+    If a domain is not registered/enabled, increments its count in Redis
+    and returns 417 Expectation Failed immediately.
+    """
+    # Try API key first
+    if x_api_key:
+        key_count = db.query(ApiKey).filter(ApiKey.active == True).count()
+        if key_count == 0:
+            return (None, "api_key")
+
+        key_prefix = x_api_key[:8]
+        api_key = db.query(ApiKey).filter(
+            ApiKey.key_prefix == key_prefix,
+            ApiKey.active == True,
+        ).first()
+
+        if api_key and bcrypt.checkpw(x_api_key.encode(), api_key.key_hash.encode()):
+            from datetime import datetime
+            api_key.last_used_at = datetime.utcnow()
+            db.commit()
+            return (api_key.project_id, "api_key")
+
+    # Try domain-based auth via Origin header
+    origin = request.headers.get("origin") or request.headers.get("referer")
+    if origin:
+        from urllib.parse import urlparse
+        parsed = urlparse(origin)
+        domain = parsed.hostname
+        if domain:
+            allowed = db.query(AllowedDomain).filter(
+                AllowedDomain.domain == domain,
+                AllowedDomain.is_enabled == True,
+            ).first()
+            if allowed:
+                return (allowed.project_id, "domain")
+
+            # Domain exists but disabled, or not registered at all — track as ignored
+            _track_ignored_domain(domain)
+            raise HTTPException(
+                status_code=417,
+                detail="Domain not registered or disabled",
+            )
+
+    raise HTTPException(
+        status_code=status.HTTP_401_UNAUTHORIZED,
+        detail="Valid API key or allowed domain required",
+    )
+
+
+def _track_ignored_domain(domain: str):
+    """Increment ignored domain counter in Redis. Fire-and-forget."""
+    try:
+        import redis
+        from app.config import get_settings
+        settings = get_settings()
+        r = redis.from_url(settings.redis_url)
+        r.hincrby("sliples:ignored_domains", domain, 1)
+        r.close()
+    except Exception:
+        pass
 
 
 def can_write_to_project(
