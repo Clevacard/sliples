@@ -112,6 +112,17 @@ For testing on localhost or internal environments:
 
 This avoids all CSP issues since everything is served from your own server.
 
+### Option 4: Allowed domains
+In dev console:
+`fetch('https://sliples.agantis.in/api/v1/recorder/snippet.js?mode=domain&endpoint=https://sliples.agantis.in/api/v1')
+  .then(r => r.text())
+  .then(eval);`
+
+  or add a snippet:
+  
+`<script>https://sliples.agantis.in/api/v1/recorder/snippet.js?mode=domain&endpoint=https://sliples.agantis.in/api/v1</script>`
+  
+
 ## Configuration
 
 ### Basic Usage

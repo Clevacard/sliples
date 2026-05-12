@@ -1156,6 +1156,7 @@ async def get_recorder_snippet(
     sequence: 0,
     isRecording: false,
     flushInterval: null,
+    lastEventTime: null,
 
     getHeaders: function() {{
       const h = {{'Content-Type': 'application/json'}};
@@ -1239,6 +1240,8 @@ async def get_recorder_snippet(
         ...extra,
       }};
       this.events.push(event);
+      this.lastEventTime = Date.now();
+      try {{ localStorage.setItem('_sliples_last_event', String(this.lastEventTime)); }} catch(e) {{}}
     }},
 
     flush: async function() {{
@@ -1367,7 +1370,8 @@ async def get_recorder_snippet(
     }},
 
     start: async function(name) {{
-      if (this.isRecording) return;
+      if (this.isRecording || this._starting) return;
+      this._starting = true;
       const sessionName = name || 'Recording ' + new Date().toLocaleString();
       try {{
         const resp = await fetch(CONFIG.endpoint + '/recorder/sessions', {{
@@ -1384,6 +1388,9 @@ async def get_recorder_snippet(
         if (!resp.ok) throw new Error('Failed to start session: ' + resp.status);
         const data = await resp.json();
         this.sessionId = data.session_id;
+        try {{ localStorage.setItem('_sliples_session_id', this.sessionId); }} catch(e) {{}}
+        try {{ localStorage.setItem('_sliples_session_name', sessionName); }} catch(e) {{}}
+        try {{ localStorage.setItem('_sliples_last_event', String(Date.now())); }} catch(e) {{}}
         this.isRecording = true;
         this.sequence = 0;
         this.events = [];
@@ -1406,8 +1413,10 @@ async def get_recorder_snippet(
         this.setupErrorCapture();
         this.flushInterval = setInterval(() => this.flush(), 3000);
 
-        console.log('[Sliples] Recording started. Session:', this.sessionId);
+        this._starting = false;
+        console.log('[Sliples] Recording started. Session:', this.sessionId, '(' + sessionName + ')');
       }} catch (e) {{
+        this._starting = false;
         console.error('[Sliples] Failed to start recording:', e);
       }}
     }},
@@ -1439,7 +1448,36 @@ async def get_recorder_snippet(
       }} catch (e) {{
         console.error('[Sliples] Failed to stop recording:', e);
       }}
+      try {{ localStorage.removeItem('_sliples_session_id'); localStorage.removeItem('_sliples_session_name'); localStorage.removeItem('_sliples_last_event'); }} catch(e) {{}}
       this.sessionId = null;
+    }},
+
+    resume: function(sessionId, sessionName) {{
+      if (this.isRecording) return;
+      this.sessionId = sessionId;
+      this.isRecording = true;
+      this.sequence = 0;
+      this.events = [];
+
+      document.addEventListener('click', this._handleClick, true);
+      document.addEventListener('input', this._handleInput, true);
+      document.addEventListener('change', this._handleChange, true);
+      document.addEventListener('submit', this._handleSubmit, true);
+      document.addEventListener('keydown', this._handleKeydown, true);
+
+      this._navObserver = new MutationObserver(() => {{
+        if (this._lastUrl !== window.location.href) {{
+          this._lastUrl = window.location.href;
+          this.record('navigation', null, {{ url: window.location.href }});
+        }}
+      }});
+      this._navObserver.observe(document.body, {{ childList: true, subtree: true }});
+      this._lastUrl = window.location.href;
+
+      this.setupErrorCapture();
+      this.flushInterval = setInterval(() => this.flush(), 3000);
+
+      console.log('[Sliples] Recording resumed. Session:', this.sessionId, '(' + sessionName + ')');
     }},
 
     init: function() {{
@@ -1452,10 +1490,14 @@ async def get_recorder_snippet(
     }},
   }}.init();
 
+  // Guard against double-execution (SPA re-renders, duplicate script tags)
+  if (window.SliplesRecorder && (window.SliplesRecorder.isRecording || window.SliplesRecorder._starting)) return;
   window.SliplesRecorder = SliplesRecorder;
 
-  // Auto-init: start recording automatically with OS-browser-timestamp name
+  // Auto-init: resume existing session or start new one
   (function autoInit() {{
+    const STALE_MS = 15 * 60 * 1000; // 15 minutes
+
     function detectOS() {{
       const ua = navigator.userAgent;
       if (/Windows/.test(ua)) return 'win';
@@ -1477,8 +1519,30 @@ async def get_recorder_snippet(
       const d = new Date();
       return '' + d.getFullYear() + String(d.getMonth()+1).padStart(2,'0') + String(d.getDate()).padStart(2,'0') + String(d.getHours()).padStart(2,'0') + String(d.getMinutes()).padStart(2,'0');
     }}
-    const name = detectOS() + '-' + detectBrowser() + '-' + timestamp();
-    SliplesRecorder.start(name);
+
+    let resumed = false;
+    try {{
+      const storedId = localStorage.getItem('_sliples_session_id');
+      const storedName = localStorage.getItem('_sliples_session_name');
+      const lastEvent = parseInt(localStorage.getItem('_sliples_last_event') || '0', 10);
+      if (storedId && storedName && lastEvent) {{
+        const gap = Date.now() - lastEvent;
+        if (gap < STALE_MS) {{
+          SliplesRecorder.resume(storedId, storedName);
+          resumed = true;
+        }} else {{
+          // Gap too long — clear stale session
+          localStorage.removeItem('_sliples_session_id');
+          localStorage.removeItem('_sliples_session_name');
+          localStorage.removeItem('_sliples_last_event');
+        }}
+      }}
+    }} catch(e) {{}}
+
+    if (!resumed) {{
+      const name = detectOS() + '-' + detectBrowser() + '-' + timestamp();
+      SliplesRecorder.start(name);
+    }}
   }})();
 }})();
 """
