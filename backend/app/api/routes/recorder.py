@@ -406,7 +406,7 @@ async def get_recording_events(
 
     events = db.query(RecordedEvent).filter(
         RecordedEvent.session_id == session_id
-    ).order_by(RecordedEvent.sequence).all()
+    ).order_by(RecordedEvent.timestamp, RecordedEvent.sequence).all()
 
     return [
         RecordedEventResponse(
@@ -570,7 +570,7 @@ async def export_sessions(
 
         events = db.query(RecordedEvent).filter(
             RecordedEvent.session_id == sid
-        ).order_by(RecordedEvent.sequence).all()
+        ).order_by(RecordedEvent.timestamp, RecordedEvent.sequence).all()
 
         compact_events = []
         for e in events:
