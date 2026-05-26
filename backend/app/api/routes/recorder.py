@@ -1407,7 +1407,8 @@ async def get_recorder_snippet(
             this.record('navigation', null, {{ url: window.location.href }});
           }}
         }});
-        this._navObserver.observe(document.body, {{ childList: true, subtree: true }});
+        const observeTarget = document.body || document.documentElement;
+        if (observeTarget) this._navObserver.observe(observeTarget, {{ childList: true, subtree: true }});
         this._lastUrl = window.location.href;
 
         this.setupErrorCapture();
@@ -1471,7 +1472,8 @@ async def get_recorder_snippet(
           this.record('navigation', null, {{ url: window.location.href }});
         }}
       }});
-      this._navObserver.observe(document.body, {{ childList: true, subtree: true }});
+      const observeTarget = document.body || document.documentElement;
+      if (observeTarget) this._navObserver.observe(observeTarget, {{ childList: true, subtree: true }});
       this._lastUrl = window.location.href;
 
       this.setupErrorCapture();
@@ -1494,8 +1496,8 @@ async def get_recorder_snippet(
   if (window.SliplesRecorder && (window.SliplesRecorder.isRecording || window.SliplesRecorder._starting)) return;
   window.SliplesRecorder = SliplesRecorder;
 
-  // Auto-init: resume existing session or start new one
-  (function autoInit() {{
+  // Auto-init: resume existing session or start new one (defer until DOM ready)
+  function autoInit() {{
     const STALE_MS = 15 * 60 * 1000; // 15 minutes
 
     function detectOS() {{
@@ -1543,7 +1545,13 @@ async def get_recorder_snippet(
       const name = detectOS() + '-' + detectBrowser() + '-' + timestamp();
       SliplesRecorder.start(name);
     }}
-  }})();
+  }}
+
+  if (document.readyState === 'loading') {{
+    document.addEventListener('DOMContentLoaded', autoInit);
+  }} else {{
+    autoInit();
+  }}
 }})();
 """
     return snippet
