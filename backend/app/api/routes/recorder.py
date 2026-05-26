@@ -1266,12 +1266,18 @@ async def get_recorder_snippet(
 
     handleInput: function(e) {{
       clearTimeout(e.target._sliplesTimeout);
-      e.target._sliplesTimeout = setTimeout(() => {{
-        this.record('input', e.target, {{ value: e.target.type === 'password' ? '***' : e.target.value }});
+      const el = e.target;
+      el._sliplesTimeout = setTimeout(() => {{
+        const isSensitive = el.type === 'password' || el.autocomplete === 'current-password' || el.autocomplete === 'new-password';
+        this.record('input', el, {{ value: isSensitive ? '***' : el.value }});
       }}, 500);
     }},
 
-    handleChange: function(e) {{ this.record('change', e.target, {{ value: e.target.value }}); }},
+    handleChange: function(e) {{
+      const el = e.target;
+      const isSensitive = el.type === 'password' || el.autocomplete === 'current-password' || el.autocomplete === 'new-password';
+      this.record('change', el, {{ value: isSensitive ? '***' : el.value }});
+    }},
     handleSubmit: function(e) {{ this.record('submit', e.target); }},
 
     handleKeydown: function(e) {{
