@@ -1,0 +1,8 @@
+{
+  "name": "sliples-recorder",
+  "description": "Authenticate with Sliples via browser OAuth and analyse front-end recording sessions.",
+  "author": {
+    "name": "Agantis",
+    "url": "https://sliples.agantis.in"
+  }
+}

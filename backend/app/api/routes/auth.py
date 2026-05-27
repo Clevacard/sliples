@@ -1,7 +1,9 @@
 """Authentication and API key management endpoints."""
 
+import base64
+import json
 import secrets
-from datetime import datetime
+from datetime import datetime, timedelta
 from typing import Optional
 from uuid import UUID
 
@@ -274,13 +276,28 @@ class AuthCallbackResponse(BaseModel):
     token: TokenResponse
 
 
+class CliTokenCreateResponse(BaseModel):
+    """Response for CLI device-flow token creation."""
+    nonce: str
+    login_url: str
+    expires_in: int
+
+
+class CliTokenPollResponse(BaseModel):
+    """Response for CLI device-flow token poll."""
+    status: str
+    access_token: Optional[str] = None
+    expires_at: Optional[str] = None
+
+
 @router.get("/auth/google/login")
-async def google_login(request: Request, redirect: bool = True):
+async def google_login(request: Request, redirect: bool = True, cli_token: Optional[str] = None):
     """
     Initiate Google OAuth2 login flow.
 
     By default, redirects directly to Google for authentication.
     If redirect=false, returns the authorization URL as JSON for frontend use.
+    If cli_token is provided, encodes the nonce into OAuth state for CLI device-flow.
     """
     settings = get_settings()
 
@@ -290,16 +307,21 @@ async def google_login(request: Request, redirect: bool = True):
             detail="Google OAuth is not configured",
         )
 
-    authorization_url, state = get_authorization_url()
+    if cli_token:
+        # Encode nonce into composite state: "<random>.<b64url(nonce)>"
+        encoded = base64.urlsafe_b64encode(cli_token.encode()).decode().rstrip("=")
+        composite_state = f"{secrets.token_urlsafe(16)}.{encoded}"
+        authorization_url, _ = get_authorization_url(state=composite_state)
+        state = composite_state
+    else:
+        authorization_url, state = get_authorization_url()
 
     if redirect:
-        # Direct redirect to Google
         return RedirectResponse(
             url=authorization_url,
             status_code=status.HTTP_302_FOUND,
         )
 
-    # Return JSON for programmatic use
     return GoogleLoginResponse(
         authorization_url=authorization_url,
         state=state,
@@ -386,6 +408,36 @@ async def google_callback(
         # Create JWT token
         token_response = create_access_token(user.id, user.email)
 
+        # ── CLI device-flow: write JWT to Redis nonce if present in state ──
+        if state and "." in state:
+            try:
+                _, encoded = state.split(".", 1)
+                padding = "=" * (4 - len(encoded) % 4)
+                cli_token_nonce = base64.urlsafe_b64decode(encoded + padding).decode()
+                import redis as _redis
+                _settings = get_settings()
+                _r = _redis.from_url(_settings.redis_url)
+                try:
+                    _key = f"sliples:cli_token:{cli_token_nonce}"
+                    if _r.exists(_key):
+                        expires_at = (
+                            datetime.utcnow() + timedelta(hours=_settings.jwt_expiry_hours)
+                        ).isoformat() + "Z"
+                        _r.set(_key, json.dumps({
+                            "status": "complete",
+                            "access_token": token_response.access_token,
+                            "expires_at": expires_at,
+                        }), ex=300)
+                        return RedirectResponse(
+                            url=f"{settings.frontend_url}/auth/cli-success",
+                            status_code=status.HTTP_302_FOUND,
+                        )
+                finally:
+                    _r.close()
+            except Exception:
+                pass  # Not a CLI flow or malformed state — fall through to normal redirect
+        # ── end CLI device-flow ──
+
         # Create redirect response with cookie
         response = RedirectResponse(
             url=f"{settings.frontend_url}/",
@@ -468,3 +520,71 @@ async def get_token(
     Requires valid JWT authentication.
     """
     return create_access_token(current_user.id, current_user.email)
+
+
+# =============================================================================
+# CLI Device-Flow Auth
+# =============================================================================
+
+
+@router.post("/auth/cli-token", response_model=CliTokenCreateResponse, status_code=status.HTTP_201_CREATED)
+async def create_cli_token():
+    """
+    Create a short-lived nonce for CLI device-flow auth.
+
+    No authentication required. Returns a nonce and a login URL.
+    The CLI opens the login URL in a browser, the user authenticates via Google,
+    and the CLI polls GET /auth/cli-token/{nonce} until the JWT is ready.
+    """
+    import redis as _redis
+    settings = get_settings()
+
+    nonce = secrets.token_urlsafe(32)
+    _r = _redis.from_url(settings.redis_url)
+    try:
+        _r.set(
+            f"sliples:cli_token:{nonce}",
+            json.dumps({"status": "pending"}),
+            ex=120,
+        )
+    finally:
+        _r.close()
+
+    # Derive base API URL from google_redirect_uri (e.g. https://sliples.agantis.in/api/v1/auth/google/callback → https://sliples.agantis.in)
+    from urllib.parse import urlparse
+    _parsed = urlparse(settings.google_redirect_uri)
+    api_base = f"{_parsed.scheme}://{_parsed.netloc}"
+    login_url = f"{api_base}/api/v1/auth/google/login?cli_token={nonce}"
+    return CliTokenCreateResponse(nonce=nonce, login_url=login_url, expires_in=120)
+
+
+@router.get("/auth/cli-token/{nonce}", response_model=CliTokenPollResponse)
+async def poll_cli_token(nonce: str):
+    """
+    Poll for a JWT after CLI device-flow login.
+
+    Returns 202 while pending, 200 with JWT when complete, 404 if expired.
+    """
+    import redis as _redis
+    from fastapi.responses import JSONResponse
+    settings = get_settings()
+
+    _r = _redis.from_url(settings.redis_url)
+    try:
+        raw = _r.get(f"sliples:cli_token:{nonce}")
+    finally:
+        _r.close()
+
+    if raw is None:
+        raise HTTPException(status_code=status.HTTP_404_NOT_FOUND, detail="CLI token not found or expired")
+
+    data = json.loads(raw)
+
+    if data["status"] == "complete":
+        return CliTokenPollResponse(
+            status="complete",
+            access_token=data["access_token"],
+            expires_at=data["expires_at"],
+        )
+
+    return JSONResponse(status_code=202, content={"status": "pending"})

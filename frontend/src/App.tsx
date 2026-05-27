@@ -22,6 +22,7 @@ import Pages from './pages/Pages'
 import AdminRoute from './components/AdminRoute'
 import Recordings from './pages/Recordings'
 import RecordingDetails from './pages/RecordingDetails'
+import CliSuccess from './pages/CliSuccess'
 
 function App() {
   return (
@@ -29,6 +30,7 @@ function App() {
       {/* Public routes */}
       <Route path="/login" element={<Login />} />
       <Route path="/auth/callback" element={<AuthCallback />} />
+      <Route path="/auth/cli-success" element={<CliSuccess />} />
 
       {/* Protected routes */}
       <Route

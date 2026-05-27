@@ -334,13 +334,17 @@ async def list_recordings(
     db: Session = Depends(get_db),
     _auth = Depends(get_api_key_or_user),
     project: Optional[Project] = Depends(verify_project_access),
+    domain: Optional[str] = None,
+    limit: int = 20,
 ):
-    """List all recording sessions, optionally filtered by project."""
+    """List all recording sessions, optionally filtered by project, domain, and limit."""
     query = db.query(RecordingSession)
     if project:
         query = query.filter(RecordingSession.project_id == project.id)
+    if domain:
+        query = query.filter(RecordingSession.domain == domain)
 
-    sessions = query.order_by(RecordingSession.created_at.desc()).all()
+    sessions = query.order_by(RecordingSession.created_at.desc()).limit(min(limit, 100)).all()
 
     result = []
     for session in sessions:
