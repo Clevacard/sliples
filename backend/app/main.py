@@ -114,7 +114,7 @@ async def root():
     }
 
 
-@app.get("/claude-marketplace.json", include_in_schema=False)
+@app.get("/api/v1/claude-marketplace.json", include_in_schema=False)
 async def claude_marketplace():
     """Serve the Claude Code plugin marketplace manifest."""
     from fastapi.responses import JSONResponse
