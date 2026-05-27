@@ -1,0 +1,26 @@
+{
+  "name": "sliples-recorder",
+  "version": "1.0.0",
+  "description": "Authenticate with Sliples via browser OAuth and analyse front-end recording sessions. No API keys needed.",
+  "author": {
+    "name": "Agantis",
+    "url": "https://agantis.team"
+  },
+  "homepage": "https://sliples.agantis.in",
+  "repository": "https://github.com/Clevacard/sliples",
+  "license": "MIT",
+  "keywords": ["recorder", "testing", "ux", "analytics"],
+  "skills": "./skills/",
+  "interface": {
+    "displayName": "Sliples Recorder",
+    "shortDescription": "Analyse Sliples front-end recordings directly in Claude.",
+    "longDescription": "Authenticate with Sliples via browser-based Google OAuth and analyse real user recording sessions — clicks, inputs, navigation, errors. No API keys required.",
+    "developerName": "Agantis",
+    "category": "Testing",
+    "capabilities": ["Read"],
+    "websiteURL": "https://sliples.agantis.in",
+    "privacyPolicyURL": "https://sliples.agantis.in",
+    "termsOfServiceURL": "https://sliples.agantis.in",
+    "brandColor": "#6366f1"
+  }
+}

@@ -114,6 +114,40 @@ async def root():
     }
 
 
+@app.get("/claude-marketplace.json", include_in_schema=False)
+async def claude_marketplace():
+    """Serve the Claude Code plugin marketplace manifest."""
+    from fastapi.responses import JSONResponse
+    manifest = {
+        "$schema": "https://anthropic.com/claude-code/marketplace.schema.json",
+        "name": "sliples",
+        "description": "Sliples plugins for Claude Code — UI recording analysis and test automation tools",
+        "owner": {
+            "name": "Agantis",
+            "email": "hello@agantis.team"
+        },
+        "plugins": [
+            {
+                "name": "sliples-recorder",
+                "description": "Authenticate with Sliples via browser OAuth and analyse front-end recording sessions. Browse sessions, inspect event streams, and get AI analysis of user behaviour — no API keys needed.",
+                "author": {"name": "Agantis"},
+                "category": "testing",
+                "source": {
+                    "source": "git-subdir",
+                    "url": "https://github.com/Clevacard/sliples.git",
+                    "path": ".claude/plugins/sliples-recorder",
+                    "ref": "main"
+                },
+                "homepage": "https://sliples.agantis.in"
+            }
+        ]
+    }
+    return JSONResponse(
+        content=manifest,
+        headers={"Access-Control-Allow-Origin": "*", "Cache-Control": "public, max-age=300"},
+    )
+
+
 from fastapi.openapi.docs import get_swagger_ui_html, get_redoc_html
 
 

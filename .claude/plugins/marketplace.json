@@ -1,0 +1,26 @@
+{
+  "$schema": "https://anthropic.com/claude-code/marketplace.schema.json",
+  "name": "sliples",
+  "description": "Sliples plugins for Claude Code — UI recording analysis and test automation tools",
+  "owner": {
+    "name": "Agantis",
+    "email": "hello@agantis.team"
+  },
+  "plugins": [
+    {
+      "name": "sliples-recorder",
+      "description": "Authenticate with Sliples via browser OAuth and analyse front-end recording sessions. Browse sessions, inspect event streams, and get AI analysis of user behaviour — no API keys needed.",
+      "author": {
+        "name": "Agantis"
+      },
+      "category": "testing",
+      "source": {
+        "source": "git-subdir",
+        "url": "https://github.com/Clevacard/sliples.git",
+        "path": ".claude/plugins/sliples-recorder",
+        "ref": "main"
+      },
+      "homepage": "https://sliples.agantis.in"
+    }
+  ]
+}
