@@ -22,6 +22,7 @@ interface AuthState {
   handleCallback: (code: string) => Promise<void>
   logout: () => Promise<void>
   fetchCurrentUser: () => Promise<void>
+  clearSession: () => void
   clearError: () => void
   setLoading: (loading: boolean) => void
 }
@@ -81,16 +82,8 @@ export const useAuthStore = create<AuthState>()(
         }
       },
 
-      // Fetch current user (check session)
+      // Fetch current user (always re-validates with server)
       fetchCurrentUser: async () => {
-        const currentState = get()
-        // If we already have a user from persisted state, just mark as not loading
-        // This avoids clearing valid auth on temporary network/cookie issues
-        if (currentState.user && currentState.isAuthenticated) {
-          set({ isLoading: false })
-          return
-        }
-
         set({ isLoading: true })
         try {
           const user = await authApi.getCurrentUser()
@@ -100,13 +93,23 @@ export const useAuthStore = create<AuthState>()(
             isLoading: false,
           })
         } catch (error) {
-          // Not authenticated
+          // Not authenticated or session expired
           set({
             user: null,
             isAuthenticated: false,
             isLoading: false,
           })
         }
+      },
+
+      // Clear session without calling logout API (used by 401 interceptor)
+      clearSession: () => {
+        set({
+          user: null,
+          isAuthenticated: false,
+          isLoading: false,
+          error: null,
+        })
       },
 
       // Clear error

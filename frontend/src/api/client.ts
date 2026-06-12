@@ -38,7 +38,7 @@ api.interceptors.request.use((config) => {
   return config
 })
 
-// Extract error messages from backend responses
+// Extract error messages and handle session expiry
 api.interceptors.response.use(
   (response) => response,
   (error) => {
@@ -46,6 +46,26 @@ api.interceptors.response.use(
     if (error.response?.data?.detail) {
       error.message = error.response.data.detail
     }
+
+    // Handle expired/invalid session: redirect to login
+    if (error.response?.status === 401) {
+      // Dynamically import to avoid circular dependency
+      import('../store/auth').then(({ useAuthStore }) => {
+        const store = useAuthStore.getState()
+        const wasAuthenticated = store.isAuthenticated
+        store.clearSession()
+
+        // Only redirect if not already on login/callback pages
+        const { pathname, search } = window.location
+        const isAuthPage = pathname === '/login' || pathname === '/auth/callback'
+        if (!isAuthPage) {
+          const from = encodeURIComponent(pathname + search)
+          const expiredParam = wasAuthenticated ? '&session=expired' : ''
+          window.location.href = `/login?from=${from}${expiredParam}`
+        }
+      })
+    }
+
     return Promise.reject(error)
   }
 )

@@ -8,17 +8,13 @@ interface ProtectedRouteProps {
 
 export default function ProtectedRoute({ children }: ProtectedRouteProps) {
   const location = useLocation()
-  const { isAuthenticated, isLoading, user, fetchCurrentUser, setLoading } = useAuthStore()
+  const { isAuthenticated, isLoading, fetchCurrentUser } = useAuthStore()
 
-  // Check authentication on mount
+  // Always re-validate session with server on mount
+  // This catches expired cookies even when localStorage still has auth state
   useEffect(() => {
-    if (!user) {
-      // Try to fetch current user from session cookie
-      fetchCurrentUser()
-    } else {
-      setLoading(false)
-    }
-  }, [fetchCurrentUser, user, setLoading])
+    fetchCurrentUser()
+  }, [fetchCurrentUser])
 
   // Show loading spinner while checking auth
   if (isLoading) {

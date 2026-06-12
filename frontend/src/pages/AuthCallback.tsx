@@ -29,7 +29,10 @@ export default function AuthCallback() {
 
       try {
         await handleCallback(code)
-        navigate('/dashboard', { replace: true })
+        // Restore original destination if user was redirected here due to session expiry
+        const redirectTo = sessionStorage.getItem('sliples_login_redirect') || '/dashboard'
+        sessionStorage.removeItem('sliples_login_redirect')
+        navigate(redirectTo, { replace: true })
       } catch (err) {
         console.error('Callback error:', err)
         setError(err instanceof Error ? err.message : 'Authentication failed')

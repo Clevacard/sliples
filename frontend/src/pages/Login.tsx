@@ -1,5 +1,5 @@
 import { useEffect } from 'react'
-import { useNavigate, useSearchParams } from 'react-router-dom'
+import { useNavigate, useSearchParams, useLocation } from 'react-router-dom'
 import { useAuthStore } from '../store/auth'
 
 // Google logo SVG for the sign-in button
@@ -30,18 +30,28 @@ const GoogleLogo = () => (
 
 export default function Login() {
   const navigate = useNavigate()
+  const location = useLocation()
   const [searchParams] = useSearchParams()
   const { isAuthenticated, isLoading, error, login, clearError } = useAuthStore()
 
   const errorFromUrl = searchParams.get('error')
+  const sessionExpired = searchParams.get('session') === 'expired'
+  // from= URL param (set by 401 interceptor) takes priority over React Router state (set by ProtectedRoute)
+  const fromParam = searchParams.get('from')
+  const fromState = (location.state as { from?: { pathname: string; search?: string } } | null)?.from
+  const fromPath = fromParam
+    ? decodeURIComponent(fromParam)
+    : fromState
+      ? fromState.pathname + (fromState.search || '')
+      : null
   const displayError = errorFromUrl || error
 
-  // Redirect if already authenticated
+  // Redirect if already authenticated — go back to origin or dashboard
   useEffect(() => {
     if (isAuthenticated && !isLoading) {
-      navigate('/dashboard', { replace: true })
+      navigate(fromPath || '/dashboard', { replace: true })
     }
-  }, [isAuthenticated, isLoading, navigate])
+  }, [isAuthenticated, isLoading, navigate, fromPath])
 
   // Clear error when component unmounts
   useEffect(() => {
@@ -49,6 +59,10 @@ export default function Login() {
   }, [clearError])
 
   const handleGoogleSignIn = () => {
+    // Persist origin path through OAuth flow (OAuth redirect loses SPA state)
+    if (fromPath) {
+      sessionStorage.setItem('sliples_login_redirect', fromPath)
+    }
     login()
   }
 
@@ -65,6 +79,15 @@ export default function Login() {
         <h2 className="text-2xl font-semibold text-white text-center mb-6">
           Sign in to your account
         </h2>
+
+        {/* Session expired banner */}
+        {sessionExpired && !displayError && (
+          <div className="mb-6 p-4 bg-yellow-900/50 border border-yellow-600 rounded-lg">
+            <p className="text-yellow-300 text-sm text-center">
+              Your session has expired. Please sign in again.
+            </p>
+          </div>
+        )}
 
         {/* Error message */}
         {displayError && (
