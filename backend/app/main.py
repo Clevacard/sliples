@@ -8,7 +8,7 @@ from starlette.middleware.base import BaseHTTPMiddleware
 from starlette.responses import Response, StreamingResponse
 from starlette.datastructures import MutableHeaders
 
-from app.api.routes import health, environments, scenarios, runs, repos, steps, browsers, auth, users, schedules, seed, test_session, projects, pages, parser, recorder
+from app.api.routes import health, environments, scenarios, runs, repos, steps, browsers, auth, users, schedules, seed, test_session, projects, pages, parser, recorder, stream
 from app.api.routes import settings as settings_routes
 from app.config import get_settings
 from app.database import engine
@@ -102,6 +102,7 @@ app.include_router(test_session.router, prefix="/api/v1", tags=["Test Sessions"]
 app.include_router(settings_routes.router, prefix="/api/v1", tags=["Settings"])
 app.include_router(parser.router, prefix="/api/v1", tags=["Parser"])
 app.include_router(recorder.router, prefix="/api/v1", tags=["Recorder"])
+app.include_router(stream.router, prefix="/api/v1", tags=["Streaming"])
 
 
 @app.get("/")

@@ -12,6 +12,7 @@ from app.api.routes import (
     schedules,
     seed,
     steps,
+    stream,
     test_session,
     users,
 )
@@ -28,6 +29,7 @@ __all__ = [
     "schedules",
     "seed",
     "steps",
+    "stream",
     "test_session",
     "users",
 ]

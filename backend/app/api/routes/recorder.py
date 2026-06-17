@@ -16,9 +16,81 @@ from sqlalchemy.orm import Session
 from app.database import get_db
 from app.models import RecordingSession, RecordedEvent, RecordingStatus, Project, ApiKey, PlaybackRun, PlaybackStepResult, PlaybackStatus, PlaybackStepStatus, Environment, BrowserConfig, AllowedDomain
 from app.api.deps import get_api_key, verify_project_access, get_validated_api_key, get_api_key_or_user, get_domain_or_api_key_auth
+from app.services.stream_manager import StreamEventBroadcaster, format_event_for_mcp, get_redis_for_streaming
 
 
 router = APIRouter()
+
+
+# =============================================================================
+# Stream Broadcasting Helper
+# =============================================================================
+
+async def _broadcast_events_to_stream(session_id: UUID, events: list):
+    """
+    Broadcast recorded events to WebSocket stream clients.
+
+    Runs asynchronously without blocking the HTTP response.
+    """
+    try:
+        redis = await get_redis_for_streaming()
+        try:
+            for event in events:
+                event_dict = {
+                    "id": str(event.id),
+                    "sequence": event.sequence,
+                    "timestamp": event.timestamp.isoformat(),
+                    "event_type": event.event_type,
+                    "url": event.url,
+                    "selector_css": event.selector_css,
+                    "selector_xpath": event.selector_xpath,
+                    "selector_text": event.selector_text,
+                    "selector_test_id": event.selector_test_id,
+                    "selector_aria": event.selector_aria,
+                    "tag_name": event.tag_name,
+                    "element_id": event.element_id,
+                    "element_type": event.element_type,
+                    "label_text": event.label_text,
+                    "value": event.value,
+                    "coordinates": event.coordinates,
+                    "key_info": event.key_info,
+                    "extra_data": event.extra_data,
+                }
+
+                # Publish to Redis (picked up by WebSocket subscribers)
+                await StreamEventBroadcaster.publish_event(
+                    redis,
+                    str(session_id),
+                    "event_recorded",
+                    format_event_for_mcp(event_dict),
+                    sequence=event.sequence,
+                )
+        finally:
+            await redis.close()
+    except Exception as e:
+        # Log error but don't fail the request
+        print(f"Failed to broadcast events to stream: {e}")
+
+
+async def _broadcast_session_event(session_id: UUID, event_type: str, data: dict):
+    """
+    Broadcast session lifecycle events (started, stopped, etc.).
+
+    Runs asynchronously without blocking the HTTP response.
+    """
+    try:
+        redis = await get_redis_for_streaming()
+        try:
+            await StreamEventBroadcaster.publish_event(
+                redis,
+                str(session_id),
+                event_type,
+                data,
+            )
+        finally:
+            await redis.close()
+    except Exception as e:
+        print(f"Failed to broadcast session event: {e}")
 
 
 # Request/Response schemas
@@ -237,6 +309,13 @@ async def start_recording(
     db.commit()
     db.refresh(session)
 
+    # Broadcast session started event
+    asyncio.create_task(_broadcast_session_event(session.id, "session_started", {
+        "name": session.name,
+        "url": session.url,
+        "domain": session.domain,
+    }))
+
     return RecordingStartResponse(
         session_id=session.id,
         name=session.name,
@@ -255,6 +334,7 @@ async def record_events(
     Record a batch of UI events for a session.
 
     Events are batched by the recorder snippet and sent periodically.
+    Also broadcasts events to any connected stream clients in real-time.
     """
     session = db.query(RecordingSession).filter(RecordingSession.id == session_id).first()
     if not session:
@@ -263,6 +343,7 @@ async def record_events(
     if session.status != RecordingStatus.recording:
         raise HTTPException(status_code=status.HTTP_400_BAD_REQUEST, detail="Recording session is not active")
 
+    recorded_events = []
     for event_data in request.events:
         event = RecordedEvent(
             session_id=session_id,
@@ -289,8 +370,13 @@ async def record_events(
             extra_data=event_data.extra_data,
         )
         db.add(event)
+        recorded_events.append(event)
 
     db.commit()
+
+    # Broadcast events to stream clients (fire and forget)
+    asyncio.create_task(_broadcast_events_to_stream(session_id, recorded_events))
+
     return {"recorded": len(request.events)}
 
 
@@ -311,6 +397,12 @@ async def stop_recording(
     db.refresh(session)
 
     event_count = db.query(RecordedEvent).filter(RecordedEvent.session_id == session_id).count()
+
+    # Broadcast session stopped event
+    asyncio.create_task(_broadcast_session_event(session_id, "session_stopped", {
+        "event_count": event_count,
+        "stopped_at": session.stopped_at.isoformat(),
+    }))
 
     return RecordingSessionResponse(
         id=session.id,
