@@ -436,7 +436,7 @@ async def list_recordings(
     if domain:
         query = query.filter(RecordingSession.domain == domain)
 
-    sessions = query.order_by(RecordingSession.created_at.desc()).limit(min(limit, 100)).all()
+    sessions = query.order_by(RecordingSession.created_at.desc()).limit(min(limit, 5000)).all()
 
     result = []
     for session in sessions:
