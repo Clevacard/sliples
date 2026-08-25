@@ -427,7 +427,7 @@ async def list_recordings(
     _auth = Depends(get_api_key_or_user),
     project: Optional[Project] = Depends(verify_project_access),
     domain: Optional[str] = None,
-    limit: int = 100,
+    limit: int = 500,
 ):
     """List all recording sessions, optionally filtered by project, domain, and limit."""
     query = db.query(RecordingSession)
