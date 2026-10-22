@@ -32,6 +32,12 @@ spec:
               value: sliples_ci
             - name: POSTGRES_DB
               value: sliples_test
+            # OpenShift runs with a random UID, so the data dir must live on a writable volume.
+            - name: PGDATA
+              value: /var/lib/postgresql/data/pgdata
+          volumeMounts:
+            - name: pgdata
+              mountPath: /var/lib/postgresql/data
           readinessProbe:
             exec:
               command: ["pg_isready", "-U", "sliples", "-d", "sliples_test"]
@@ -57,6 +63,9 @@ spec:
             allowPrivilegeEscalation: false
             capabilities:
               drop: ["ALL"]
+      volumes:
+        - name: pgdata
+          emptyDir: {}
       containers:
         - name: tests
           image: sliples-backend:${CI_IMAGE_TAG}
@@ -67,7 +76,11 @@ spec:
               set -e
               export HOME=/tmp PYTHONUSERBASE=/tmp/.local PATH="/tmp/.local/bin:$PATH"
               pip install --quiet --no-cache-dir --user pytest pytest-asyncio pytest-cov
-              until python -c "import socket; socket.create_connection(('localhost', 5432), 2)" 2>/dev/null; do sleep 1; done
+              for i in $(seq 60); do
+                python -c "import socket; socket.create_connection(('localhost', 5432), 2)" 2>/dev/null && break
+                [ "$i" = 60 ] && { echo "postgres sidecar not reachable after 120s" >&2; exit 1; }
+                sleep 2
+              done
               pytest tests -v --tb=short --junitxml=/tmp/junit.xml
           env:
             - name: DATABASE_URL
