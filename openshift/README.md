@@ -32,7 +32,7 @@ oc login --token=<token> --server=<server>
 oc apply -f namespace.yaml
 # create secrets first (see secrets/secrets-template.yaml), then:
 oc apply -k openshift/
-oc get routes -n sliples
+oc get routes -n slipless
 ```
 
 Images are built in-cluster by the BuildConfigs and pulled from the ImageStreams, which have
@@ -67,7 +67,7 @@ oc rollout restart deployment/sliples-backend deployment/sliples-worker deployme
 2. Add GitHub repository secrets:
    - `OPENSHIFT_SERVER`: cluster API URL (must be reachable from GitHub-hosted runners, otherwise use a self-hosted runner)
    - `OPENSHIFT_TOKEN`: the token from step 1
-   - (optional repository variable `OPENSHIFT_NAMESPACE`, default `slipless`)
+   - (optional repository variable `OPENSHIFT_NAMESPACE`, default `slipless`; set in repo settings, not by CLI)
    - `IMPERSON_WEBHOOK_URL`: see below (optional; notifications are skipped when unset)
 3. Point the live BuildConfigs at `:candidate`: `oc patch bc/sliples-backend -n slipless -p '{"spec":{"output":{"to":{"name":"sliples-backend:candidate"}}}}'` (same for frontend). Plain `oc start-build` no longer updates `:latest`; only a pipeline deploy does.
 4. Create the `production` environment in GitHub (add required reviewers if deploys should be gated).
@@ -87,12 +87,12 @@ there or the events are ignored.
 ## Operations
 
 ```bash
-oc get pods -n sliples
-oc logs -f deployment/sliples-backend -n sliples
-oc logs -f deployment/sliples-worker -n sliples
-oc scale deployment/sliples-worker --replicas=5 -n sliples
-oc rollout history deployment/sliples-backend -n sliples
-oc rollout undo deployment/sliples-backend -n sliples
+oc get pods -n slipless
+oc logs -f deployment/sliples-backend -n slipless
+oc logs -f deployment/sliples-worker -n slipless
+oc scale deployment/sliples-worker --replicas=5 -n slipless
+oc rollout history deployment/sliples-backend -n slipless
+oc rollout undo deployment/sliples-backend -n slipless
 ```
 
 Health checks: the backend exposes `GET /health`. For WebSocket streaming, the backend route needs
