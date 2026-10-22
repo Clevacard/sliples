@@ -1355,6 +1355,48 @@ async def get_recorder_snippet(
       }}
     }},
 
+    // Synchronous flush for page unload/navigation: the page may be killed before
+    // an awaited fetch resolves, so use keepalive (or sendBeacon as last resort).
+    // The buffer is NOT re-queued on failure - the page is going away anyway.
+    flushOnUnload: function() {{
+      if (!this.events.length || !this.sessionId) return;
+      const batch = this.events.splice(0, this.events.length);
+      const url = CONFIG.endpoint + '/recorder/sessions/' + this.sessionId + '/events';
+      const body = JSON.stringify({{ events: batch }});
+      try {{
+        fetch(url, {{
+          method: 'POST',
+          headers: this.getHeaders(),
+          body: body,
+          keepalive: true,
+        }});
+      }} catch (e) {{
+        // sendBeacon cannot carry X-API-Key; domain auth via Origin header still works
+        try {{ navigator.sendBeacon(url, new Blob([body], {{ type: 'application/json' }})); }} catch (e2) {{}}
+      }}
+    }},
+
+    setupUnloadFlush: function() {{
+      const self = this;
+      this._onPageHide = function() {{ self.flushOnUnload(); }};
+      this._onVisibilityChange = function() {{
+        if (document.visibilityState === 'hidden') self.flushOnUnload();
+      }};
+      window.addEventListener('pagehide', this._onPageHide);
+      document.addEventListener('visibilitychange', this._onVisibilityChange);
+      // Flush before a form's default full-page navigation kills the page
+      const origSubmit = this._handleSubmit;
+      this._handleSubmit = function(e) {{
+        origSubmit.call(self, e);
+        self.flushOnUnload();
+      }};
+    }},
+
+    teardownUnloadFlush: function() {{
+      if (this._onPageHide) window.removeEventListener('pagehide', this._onPageHide);
+      if (this._onVisibilityChange) document.removeEventListener('visibilitychange', this._onVisibilityChange);
+    }},
+
     handleClick: function(e) {{
       const rect = e.target.getBoundingClientRect();
       this.record('click', e.target, {{ coordinates: {{ x: Math.round(e.clientX - rect.left), y: Math.round(e.clientY - rect.top) }} }});
@@ -1514,6 +1556,7 @@ async def get_recorder_snippet(
         this._lastUrl = window.location.href;
 
         this.setupErrorCapture();
+        this.setupUnloadFlush();
         this.flushInterval = setInterval(() => this.flush(), 3000);
 
         this._starting = false;
@@ -1535,6 +1578,7 @@ async def get_recorder_snippet(
       document.removeEventListener('keydown', this._handleKeydown, true);
       if (this._navObserver) this._navObserver.disconnect();
       this.teardownErrorCapture();
+      this.teardownUnloadFlush();
       clearInterval(this.flushInterval);
 
       await this.flush();
@@ -1551,6 +1595,8 @@ async def get_recorder_snippet(
       }} catch (e) {{
         console.error('[Sliples] Failed to stop recording:', e);
       }}
+      // Restore the plain submit handler bound in init() (setupUnloadFlush wrapped it)
+      this._handleSubmit = this._boundSubmit;
       try {{ localStorage.removeItem('_sliples_session_id'); localStorage.removeItem('_sliples_session_name'); localStorage.removeItem('_sliples_last_event'); }} catch(e) {{}}
       this.sessionId = null;
     }},
@@ -1579,6 +1625,7 @@ async def get_recorder_snippet(
       this._lastUrl = window.location.href;
 
       this.setupErrorCapture();
+      this.setupUnloadFlush();
       this.flushInterval = setInterval(() => this.flush(), 3000);
 
       console.log('[Sliples] Recording resumed. Session:', this.sessionId, '(' + sessionName + ')');
@@ -1590,6 +1637,7 @@ async def get_recorder_snippet(
       this._handleChange = this.handleChange.bind(this);
       this._handleSubmit = this.handleSubmit.bind(this);
       this._handleKeydown = this.handleKeydown.bind(this);
+      this._boundSubmit = this._handleSubmit;
       return this;
     }},
   }}.init();
