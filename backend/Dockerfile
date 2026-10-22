@@ -10,11 +10,12 @@ RUN apt-get update && apt-get install -y \
     && rm -rf /var/lib/apt/lists/*
 
 # Copy and install Python dependencies
-COPY pyproject.toml ./
+COPY pyproject.toml constraints.txt ./
 COPY app/__init__.py ./app/
 
 # Install dependencies
-RUN pip install --no-cache-dir .
+# constraints.txt pins every transitive dependency to what production runs
+RUN pip install --no-cache-dir -c constraints.txt .
 
 # Copy application code
 COPY . .
