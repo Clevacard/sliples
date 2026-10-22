@@ -1,0 +1,87 @@
+# Ephemeral test Job: the freshly built backend image plus Postgres and Redis
+# sidecars sharing the pod network (localhost). Needs native sidecar support
+# (initContainers with restartPolicy: Always, Kubernetes >= 1.29 / OpenShift >= 4.16)
+# so the Job completes when the test container exits.
+# Placeholders (${CI_JOB_NAME}, ${CI_IMAGE_TAG}) are filled in by the pipeline.
+apiVersion: batch/v1
+kind: Job
+metadata:
+  name: ${CI_JOB_NAME}
+  labels:
+    app.kubernetes.io/name: sliples
+    app.kubernetes.io/component: ci-test
+spec:
+  backoffLimit: 0
+  activeDeadlineSeconds: 900
+  ttlSecondsAfterFinished: 3600
+  template:
+    metadata:
+      labels:
+        app.kubernetes.io/name: sliples
+        app.kubernetes.io/component: ci-test
+    spec:
+      restartPolicy: Never
+      initContainers:
+        - name: postgres
+          image: postgres:16-alpine
+          restartPolicy: Always
+          env:
+            - name: POSTGRES_USER
+              value: sliples
+            - name: POSTGRES_PASSWORD
+              value: sliples_ci
+            - name: POSTGRES_DB
+              value: sliples_test
+          readinessProbe:
+            exec:
+              command: ["pg_isready", "-U", "sliples", "-d", "sliples_test"]
+            periodSeconds: 2
+          resources:
+            requests: {memory: 128Mi, cpu: 100m}
+            limits: {memory: 512Mi, cpu: 500m}
+          securityContext:
+            allowPrivilegeEscalation: false
+            capabilities:
+              drop: ["ALL"]
+        - name: redis
+          image: redis:7-alpine
+          restartPolicy: Always
+          readinessProbe:
+            exec:
+              command: ["redis-cli", "ping"]
+            periodSeconds: 2
+          resources:
+            requests: {memory: 64Mi, cpu: 50m}
+            limits: {memory: 256Mi, cpu: 250m}
+          securityContext:
+            allowPrivilegeEscalation: false
+            capabilities:
+              drop: ["ALL"]
+      containers:
+        - name: tests
+          image: sliples-backend:${CI_IMAGE_TAG}
+          imagePullPolicy: Always
+          command: ["/bin/sh", "-c"]
+          args:
+            - |
+              set -e
+              export HOME=/tmp PYTHONUSERBASE=/tmp/.local PATH="/tmp/.local/bin:$PATH"
+              pip install --quiet --no-cache-dir --user pytest pytest-asyncio pytest-cov
+              until python -c "import socket; socket.create_connection(('localhost', 5432), 2)" 2>/dev/null; do sleep 1; done
+              pytest tests -v --tb=short --junitxml=/tmp/junit.xml
+          env:
+            - name: DATABASE_URL
+              value: postgresql://sliples:sliples_ci@localhost:5432/sliples_test
+            - name: TEST_DATABASE_URL
+              value: postgresql://sliples:sliples_ci@localhost:5432/sliples_test
+            - name: REDIS_URL
+              value: redis://localhost:6379/1
+            - name: TESTING
+              value: "true"
+          resources:
+            requests: {memory: 256Mi, cpu: 100m}
+            limits: {memory: 1Gi, cpu: "1"}
+          securityContext:
+            allowPrivilegeEscalation: false
+            capabilities:
+              drop: ["ALL"]

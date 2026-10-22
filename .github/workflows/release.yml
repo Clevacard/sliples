@@ -1,0 +1,123 @@
+name: Release
+
+# Every PR merged into main lands here as a push.
+on:
+  push:
+    branches: [main]
+  workflow_dispatch:
+
+# One release at a time: builds share the :candidate image tag.
+concurrency:
+  group: release
+  cancel-in-progress: false
+
+permissions:
+  contents: read
+
+env:
+  NAMESPACE: ${{ vars.OPENSHIFT_NAMESPACE || 'slipless' }}
+  IMAGE_TAG: ${{ github.sha }}
+  IMPERSON_WEBHOOK_URL: ${{ secrets.IMPERSON_WEBHOOK_URL }}
+
+jobs:
+  build:
+    runs-on: ubuntu-latest
+    timeout-minutes: 30
+    steps:
+      - uses: actions/checkout@v4
+      - uses: redhat-actions/openshift-tools-installer@v1
+        with:
+          oc: latest
+      - name: Log in to OpenShift
+        run: oc login "${{ secrets.OPENSHIFT_SERVER }}" --token="${{ secrets.OPENSHIFT_TOKEN }}" -n "$NAMESPACE"
+      - run: .github/scripts/notify-imperson.sh build STARTED
+      - name: Build backend and frontend at this commit
+        run: |
+          set -euo pipefail
+          for comp in backend frontend; do
+            oc start-build "sliples-$comp" --commit="$GITHUB_SHA" -n "$NAMESPACE" --follow --wait &
+          done
+          fail=0
+          for pid in $(jobs -p); do wait "$pid" || fail=1; done
+          exit $fail
+      - name: Tag images with the commit SHA
+        run: |
+          for comp in backend frontend; do
+            oc tag "sliples-$comp:candidate" "sliples-$comp:$IMAGE_TAG" -n "$NAMESPACE"
+          done
+      - name: Notify result
+        if: always()
+        run: .github/scripts/notify-imperson.sh build COMPLETED "${{ job.status == 'success' && 'SUCCESS' || (job.status == 'cancelled' && 'ABORTED' || 'FAILURE') }}"
+
+  test:
+    needs: build
+    runs-on: ubuntu-latest
+    timeout-minutes: 20
+    steps:
+      - uses: actions/checkout@v4
+      - uses: redhat-actions/openshift-tools-installer@v1
+        with:
+          oc: latest
+      - name: Log in to OpenShift
+        run: oc login "${{ secrets.OPENSHIFT_SERVER }}" --token="${{ secrets.OPENSHIFT_TOKEN }}" -n "$NAMESPACE"
+      - run: .github/scripts/notify-imperson.sh test STARTED
+      - name: Run tests in a Job pod with Postgres and Redis sidecars
+        run: |
+          set -euo pipefail
+          export CI_JOB_NAME="sliples-ci-tests-${GITHUB_SHA::8}-${GITHUB_RUN_ATTEMPT}"
+          export CI_IMAGE_TAG="$IMAGE_TAG"
+          envsubst '${CI_JOB_NAME} ${CI_IMAGE_TAG}' < openshift/ci/test-job.yaml | oc apply -n "$NAMESPACE" -f -
+          # Wait for either outcome.
+          oc wait -n "$NAMESPACE" --for=condition=complete "job/$CI_JOB_NAME" --timeout=15m &
+          pc=$!
+          oc wait -n "$NAMESPACE" --for=condition=failed "job/$CI_JOB_NAME" --timeout=15m &
+          pf=$!
+          wait -n "$pc" "$pf" || true
+          kill "$pc" "$pf" 2>/dev/null || true
+          oc logs "job/$CI_JOB_NAME" -c tests -n "$NAMESPACE" || true
+          oc get "job/$CI_JOB_NAME" -n "$NAMESPACE" -o jsonpath='{.status.succeeded}' | grep -qx 1
+      - name: Notify result
+        if: always()
+        run: .github/scripts/notify-imperson.sh test COMPLETED "${{ job.status == 'success' && 'SUCCESS' || (job.status == 'cancelled' && 'ABORTED' || 'FAILURE') }}"
+
+  deploy:
+    needs: test
+    runs-on: ubuntu-latest
+    timeout-minutes: 20
+    environment: production
+    steps:
+      - uses: actions/checkout@v4
+      - uses: redhat-actions/openshift-tools-installer@v1
+        with:
+          oc: latest
+      - name: Log in to OpenShift
+        run: oc login "${{ secrets.OPENSHIFT_SERVER }}" --token="${{ secrets.OPENSHIFT_TOKEN }}" -n "$NAMESPACE"
+      - run: .github/scripts/notify-imperson.sh deploy STARTED
+      - name: Run database migrations
+        run: |
+          set -euo pipefail
+          export CI_JOB_NAME="sliples-ci-migrate-${GITHUB_SHA::8}-${GITHUB_RUN_ATTEMPT}"
+          export CI_IMAGE_TAG="$IMAGE_TAG"
+          envsubst '${CI_JOB_NAME} ${CI_IMAGE_TAG}' < openshift/ci/migrate-job.yaml | oc apply -n "$NAMESPACE" -f -
+          if ! oc wait -n "$NAMESPACE" --for=condition=complete "job/$CI_JOB_NAME" --timeout=10m; then
+            oc logs -n "$NAMESPACE" "job/$CI_JOB_NAME" || true
+            exit 1
+          fi
+      - name: Promote images to latest
+        run: |
+          for comp in backend frontend; do
+            oc tag "sliples-$comp:$IMAGE_TAG" "sliples-$comp:latest" -n "$NAMESPACE"
+          done
+      - name: Roll out
+        run: |
+          set -euo pipefail
+          # Deployments reference :latest with imagePullPolicy Always.
+          for d in sliples-backend sliples-worker sliples-beat sliples-frontend; do
+            oc rollout restart "deployment/$d" -n "$NAMESPACE"
+          done
+          for d in sliples-backend sliples-worker sliples-beat sliples-frontend; do
+            oc rollout status "deployment/$d" -n "$NAMESPACE" --timeout=10m
+          done
+      - name: Notify result
+        if: always()
+        run: .github/scripts/notify-imperson.sh deploy COMPLETED "${{ job.status == 'success' && 'SUCCESS' || (job.status == 'cancelled' && 'ABORTED' || 'FAILURE') }}"

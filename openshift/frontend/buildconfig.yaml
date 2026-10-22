@@ -19,6 +19,6 @@ spec:
   output:
     to:
       kind: ImageStreamTag
-      name: sliples-frontend:latest
+      name: sliples-frontend:candidate
   triggers:
     - type: ConfigChange

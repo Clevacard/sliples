@@ -1,0 +1,38 @@
+# Runs alembic migrations with the new image before the rollout.
+# Placeholders (${CI_JOB_NAME}, ${CI_IMAGE_TAG}) are filled in by the pipeline.
+apiVersion: batch/v1
+kind: Job
+metadata:
+  name: ${CI_JOB_NAME}
+  labels:
+    app.kubernetes.io/name: sliples
+    app.kubernetes.io/component: ci-migrate
+spec:
+  backoffLimit: 0
+  activeDeadlineSeconds: 600
+  ttlSecondsAfterFinished: 3600
+  template:
+    metadata:
+      labels:
+        app.kubernetes.io/name: sliples
+        app.kubernetes.io/component: ci-migrate
+    spec:
+      restartPolicy: Never
+      containers:
+        - name: migrate
+          image: sliples-backend:${CI_IMAGE_TAG}
+          imagePullPolicy: Always
+          command: ["alembic", "upgrade", "head"]
+          envFrom:
+            - configMapRef:
+                name: sliples-backend-config
+          env:
+            - name: DATABASE_URL
+              valueFrom:
+                secretKeyRef:
+                  name: sliples-db-credentials
+                  key: DATABASE_URL
+          securityContext:
+            allowPrivilegeEscalation: false
+            capabilities:
+              drop: ["ALL"]
