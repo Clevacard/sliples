@@ -1,4 +1,7 @@
 // Sliples UI Recorder v1.0
+// NOTE: legacy v1 snippet kept for reference. The current v2 recorder is
+// served dynamically by the backend at /api/v1/recorder/snippet.js; this file
+// is not updated (see #138/#140).
 // Usage: Include this script, then call:
 //   SliplesRecorder.configure({ apiKey: 'your-key', endpoint: 'https://your-sliples-server/api/v1' });
 //   SliplesRecorder.start('My Test Recording');

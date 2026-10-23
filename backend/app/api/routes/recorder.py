@@ -1631,13 +1631,23 @@ async def get_recorder_snippet(
       console.log('[Sliples] Recording resumed. Session:', this.sessionId, '(' + sessionName + ')');
     }},
 
-    init: function() {{
+    init: function(options) {{
       this._handleClick = this.handleClick.bind(this);
       this._handleInput = this.handleInput.bind(this);
       this._handleChange = this.handleChange.bind(this);
       this._handleSubmit = this.handleSubmit.bind(this);
       this._handleKeydown = this.handleKeydown.bind(this);
       this._boundSubmit = this._handleSubmit;
+
+      // Optional embed config: merge into CONFIG and adopt the given session.
+      // Called with no arguments (e.g. the bootstrap below) this is a no-op and
+      // the auto-init resume/new-session flow runs unchanged.
+      if (options && typeof options === 'object') {{
+        if (options.endpoint) CONFIG.endpoint = options.endpoint;
+        if (options.apiKey) {{ CONFIG.apiKey = options.apiKey; CONFIG.authMode = 'api_key'; }}
+        if (options.projectId) CONFIG.projectId = options.projectId;
+        if (options.sessionId) this._pendingSessionId = options.sessionId;
+      }}
       return this;
     }},
   }}.init();
@@ -1673,6 +1683,22 @@ async def get_recorder_snippet(
     }}
 
     let resumed = false;
+
+    // A sessionId passed to init({...}) wins over the auto resume/start: the
+    // caller (e.g. the Start Recording modal embed) already created that
+    // session, so events must land under it rather than an auto-named one.
+    if (SliplesRecorder._pendingSessionId) {{
+      const adoptId = SliplesRecorder._pendingSessionId;
+      SliplesRecorder._pendingSessionId = null;
+      try {{
+        localStorage.setItem('_sliples_session_id', adoptId);
+        localStorage.setItem('_sliples_session_name', adoptId);
+        localStorage.setItem('_sliples_last_event', String(Date.now()));
+      }} catch(e) {{}}
+      SliplesRecorder.resume(adoptId, adoptId);
+      resumed = true;
+    }}
+
     try {{
       const storedId = localStorage.getItem('_sliples_session_id');
       const storedName = localStorage.getItem('_sliples_session_name');
