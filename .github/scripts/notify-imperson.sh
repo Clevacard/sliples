@@ -31,9 +31,10 @@ payload=$(jq -n \
     + (if $status != "" then {status: $status} else {} end)')
 
 # Token goes in a header read from stdin so it never appears in the process list.
-code=$(printf 'header = "X-CI-Token: %s"\n' "$IMPERSON_CI_TOKEN" \
-  | curl -sS -o /dev/null -w '%{http_code}' --max-time 15 \
+# Log the response body too: imperson answers 200 for "ignored" as well as "processed".
+response=$(printf 'header = "X-CI-Token: %s"\n' "$IMPERSON_CI_TOKEN" \
+  | curl -sS -w '\n%{http_code}' --max-time 15 \
       -K - -X POST -H 'Content-Type: application/json' -d "$payload" "$endpoint") \
-  || code="curl-failed"
-echo "imperson notify sliples-$stage $phase ${status:--} -> $code"
+  || response="curl-failed"
+echo "imperson notify sliples-$stage $phase ${status:--} -> ${response//$'\n'/ }"
 exit 0
