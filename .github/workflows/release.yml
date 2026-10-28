@@ -17,7 +17,7 @@ permissions:
 env:
   NAMESPACE: ${{ vars.OPENSHIFT_NAMESPACE || 'slipless' }}
   IMAGE_TAG: ${{ github.sha }}
-  IMPERSON_WEBHOOK_URL: ${{ secrets.IMPERSON_WEBHOOK_URL }}
+  IMPERSON_CI_TOKEN: ${{ secrets.IMPERSON_CI_TOKEN }}
 
 jobs:
   build:

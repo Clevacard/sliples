@@ -68,21 +68,18 @@ oc rollout restart deployment/sliples-backend deployment/sliples-worker deployme
    - `OPENSHIFT_SERVER`: cluster API URL (must be reachable from GitHub-hosted runners, otherwise use a self-hosted runner)
    - `OPENSHIFT_TOKEN`: the token from step 1
    - (optional repository variable `OPENSHIFT_NAMESPACE`, default `slipless`; set in repo settings, not by CLI)
-   - `IMPERSON_WEBHOOK_URL`: see below (optional; notifications are skipped when unset)
+   - `IMPERSON_CI_TOKEN`: imperson CI token (optional; notifications are skipped when unset)
 3. Point the live BuildConfigs at `:candidate`: `oc patch bc/sliples-backend -n slipless -p '{"spec":{"output":{"to":{"name":"sliples-backend:candidate"}}}}'` (same for frontend). Plain `oc start-build` no longer updates `:latest`; only a pipeline deploy does.
 4. Create the `production` environment in GitHub (add required reviewers if deploys should be gated).
 
 ### Imperson notifications
 
 `.github/scripts/notify-imperson.sh <stage> <phase> [status]` posts at the start and end of each
-stage (`build`, `test`, `deploy`). It never fails the pipeline.
+stage (`build`, `test`, `deploy`) to `https://imperson.agantis.in/api/v1/webhooks/team/ci`,
+authenticated with the `X-CI-Token` header. It never fails the pipeline.
 
-Imperson has no generic CI endpoint today. The script posts Jenkins Notification-plugin JSON to
-imperson's Jenkins webhook, `https://imperson.agantis.in/api/v1/webhooks/team/jenkins?token=<token>`,
-using one job per stage: `job/sliples/job/build/`, `.../test/`, `.../deploy/`. Set the full URL,
-including the token, as `IMPERSON_WEBHOOK_URL`. Imperson only routes a build to a team when the job is
-listed in a project's `devops.jenkins_jobs` (admin-managed), so these three names must be registered
-there or the events are ignored.
+The token is imperson's CI token. Store it as the GitHub secret `IMPERSON_CI_TOKEN`. The script sends
+the token through curl's stdin so it stays out of the process list.
 
 ## Operations
 
