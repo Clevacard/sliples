@@ -115,7 +115,7 @@ export default function StartRecordingModal({
       setSnippetCode(`<!-- Sliples Recorder Snippet -->
 <script src="${snippetUrl}"></script>
 <script>
-  // Start recording
+  // Adopt the recording session created for you
   SliplesRecorder.init({
     sessionId: '${recording.session_id}',
     endpoint: '${endpoint}',
