@@ -41,6 +41,7 @@ def verify_comment_token(
             token,
             settings.jwt_secret_key,
             algorithms=[settings.jwt_algorithm],
+            options={"require": ["exp", "sub"]},
         )
     except JWTError:
         raise credentials_exception
@@ -53,10 +54,12 @@ def verify_comment_token(
         raise credentials_exception
 
     user_id = payload.get("sub")
-    if not user_id:
+    try:
+        user_uuid = UUID(user_id)
+    except (ValueError, TypeError, AttributeError):
         raise credentials_exception
 
-    user = db.query(User).filter(User.id == user_id).first()
+    user = db.query(User).filter(User.id == user_uuid).first()
     if not user or not user.is_active:
         raise credentials_exception
 

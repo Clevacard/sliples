@@ -446,6 +446,7 @@ async def stop_recording(
     db.refresh(session)
 
     event_count = db.query(RecordedEvent).filter(RecordedEvent.session_id == session_id).count()
+    comment_count = db.query(RecordingComment).filter(RecordingComment.session_id == session_id).count()
 
     # Broadcast session stopped event
     asyncio.create_task(_broadcast_session_event(session_id, "session_stopped", {
@@ -467,6 +468,7 @@ async def stop_recording(
         created_at=session.created_at,
         stopped_at=session.stopped_at,
         event_count=event_count,
+        comment_count=comment_count,
     )
 
 
@@ -490,6 +492,7 @@ async def list_recordings(
     result = []
     for session in sessions:
         event_count = db.query(RecordedEvent).filter(RecordedEvent.session_id == session.id).count()
+        comment_count = db.query(RecordingComment).filter(RecordingComment.session_id == session.id).count()
         result.append(RecordingSessionResponse(
             id=session.id,
             project_id=session.project_id,
@@ -504,6 +507,7 @@ async def list_recordings(
             created_at=session.created_at,
             stopped_at=session.stopped_at,
             event_count=event_count,
+            comment_count=comment_count,
         ))
     return result
 
@@ -520,6 +524,7 @@ async def get_recording(
         raise HTTPException(status_code=status.HTTP_404_NOT_FOUND, detail="Recording session not found")
 
     event_count = db.query(RecordedEvent).filter(RecordedEvent.session_id == session_id).count()
+    comment_count = db.query(RecordingComment).filter(RecordingComment.session_id == session_id).count()
 
     return RecordingSessionResponse(
         id=session.id,
@@ -535,6 +540,7 @@ async def get_recording(
         created_at=session.created_at,
         stopped_at=session.stopped_at,
         event_count=event_count,
+        comment_count=comment_count,
     )
 
 
@@ -656,6 +662,7 @@ async def rename_session(
     db.refresh(session)
 
     event_count = db.query(RecordedEvent).filter(RecordedEvent.session_id == session_id).count()
+    comment_count = db.query(RecordingComment).filter(RecordingComment.session_id == session_id).count()
 
     return RecordingSessionResponse(
         id=session.id,
@@ -671,6 +678,7 @@ async def rename_session(
         created_at=session.created_at,
         stopped_at=session.stopped_at,
         event_count=event_count,
+        comment_count=comment_count,
     )
 
 
