@@ -16,15 +16,17 @@ depends_on = None
 
 
 def upgrade():
-    comment_type = sa.Enum('bug', 'issue', 'improvement', name='commenttype')
-    comment_type.create(op.get_bind(), checkfirst=True)
-
+    # The commenttype ENUM is created implicitly by op.create_table below
+    # (same pattern as recordingstatus in 012_add_recording_tables).
+    # A manual sa.Enum.create(checkfirst=True) here double-creates the type:
+    # create_table emits CREATE TYPE again and the deploy fails with
+    # DuplicateObject: type "commenttype" already exists.
     op.create_table(
         'recording_comments',
         sa.Column('id', UUID(as_uuid=True), primary_key=True),
         sa.Column('session_id', UUID(as_uuid=True), sa.ForeignKey('recording_sessions.id', ondelete='CASCADE'), nullable=False),
         sa.Column('user_id', UUID(as_uuid=True), sa.ForeignKey('users.id'), nullable=False),
-        sa.Column('type', comment_type, nullable=False),
+        sa.Column('type', sa.Enum('bug', 'issue', 'improvement', name='commenttype'), nullable=False),
         sa.Column('text', sa.Text, nullable=False),
         sa.Column('anchor_sequence', sa.Integer, nullable=True),
         sa.Column('anchor_timestamp', sa.DateTime, nullable=True),
