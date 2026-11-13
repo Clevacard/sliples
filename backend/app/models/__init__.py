@@ -12,6 +12,7 @@ from app.models.schedule import Schedule
 from app.models.test_session import TestSession, SessionStatus
 from app.models.page import Page, PageEnvironmentOverride
 from app.models.recording import RecordingSession, RecordedEvent, RecordingStatus
+from app.models.recording_comment import RecordingComment, RecordingCommentEdit, CommentType
 from app.models.allowed_domain import AllowedDomain
 from app.models.playback import PlaybackRun, PlaybackStepResult, PlaybackStatus, PlaybackStepStatus
 
@@ -40,6 +41,9 @@ __all__ = [
     "RecordingSession",
     "RecordedEvent",
     "RecordingStatus",
+    "RecordingComment",
+    "RecordingCommentEdit",
+    "CommentType",
     "AllowedDomain",
     "PlaybackRun",
     "PlaybackStepResult",
