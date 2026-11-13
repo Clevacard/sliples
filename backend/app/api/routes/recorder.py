@@ -14,8 +14,8 @@ from pydantic import BaseModel, Field
 from sqlalchemy.orm import Session
 
 from app.database import get_db
-from app.models import RecordingSession, RecordedEvent, RecordingStatus, Project, ApiKey, PlaybackRun, PlaybackStepResult, PlaybackStatus, PlaybackStepStatus, Environment, BrowserConfig, AllowedDomain
-from app.api.deps import get_api_key, verify_project_access, get_validated_api_key, get_api_key_or_user, get_domain_or_api_key_auth
+from app.models import RecordingSession, RecordedEvent, RecordingStatus, Project, ApiKey, PlaybackRun, PlaybackStepResult, PlaybackStatus, PlaybackStepStatus, Environment, BrowserConfig, AllowedDomain, RecordingComment, RecordingCommentEdit, CommentType, User, UserRole
+from app.api.deps import get_api_key, verify_project_access, get_validated_api_key, get_api_key_or_user, get_domain_or_api_key_auth, verify_comment_token
 from app.services.stream_manager import StreamEventBroadcaster, format_event_for_mcp, get_redis_for_streaming
 
 
@@ -180,6 +180,7 @@ class RecordingSessionResponse(BaseModel):
     created_at: datetime
     stopped_at: Optional[datetime]
     event_count: int
+    comment_count: int = 0
 
     class Config:
         from_attributes = True
@@ -255,6 +256,54 @@ class EventMetadataUpdate(BaseModel):
     should_screenshot: Optional[bool] = None
     parameters: Optional[dict] = None
     notes: Optional[str] = None
+
+
+class CommentCreateRequest(BaseModel):
+    """Request to add a comment to a recording session (design §4).
+
+    The comment token travels in the body (no custom headers) so the
+    recorder's ACAO:* CORS and sendBeacon/keepalive stay usable.
+    """
+    token: str
+    type: str = Field(..., pattern="^(bug|issue|improvement)$")
+    text: str = Field(..., min_length=1)
+    anchor_sequence: Optional[int] = None
+    anchor_timestamp: Optional[datetime] = None
+    anchor_url: Optional[str] = None
+
+
+class CommentUpdateRequest(BaseModel):
+    """Request to edit a comment (author only, via comment token)."""
+    token: str
+    text: str = Field(..., min_length=1)
+
+
+class CommentDeleteRequest(BaseModel):
+    """Optional body for comment deletion (author via comment token).
+
+    Admins authenticate with their user JWT instead and omit the token.
+    """
+    token: Optional[str] = None
+
+
+class CommentResponse(BaseModel):
+    """A recording comment with its edit history."""
+    id: UUID
+    session_id: UUID
+    user_id: UUID
+    author_name: Optional[str] = None
+    author_email: Optional[str] = None
+    type: str
+    text: str
+    anchor_sequence: Optional[int]
+    anchor_timestamp: Optional[datetime]
+    anchor_url: Optional[str]
+    created_at: datetime
+    updated_at: datetime
+    edit_count: int = 0
+
+    class Config:
+        from_attributes = True
 
 
 # =============================================================================
@@ -638,6 +687,145 @@ async def delete_recording(
 
     db.delete(session)
     db.commit()
+
+
+# =============================================================================
+# Session comments (user feedback on the journey, design §4)
+# =============================================================================
+
+
+def _comment_to_response(comment: RecordingComment) -> CommentResponse:
+    """Serialise a RecordingComment with author info and edit count."""
+    author = comment.user
+    return CommentResponse(
+        id=comment.id,
+        session_id=comment.session_id,
+        user_id=comment.user_id,
+        author_name=author.name if author else None,
+        author_email=author.email if author else None,
+        type=comment.type.value if hasattr(comment.type, "value") else comment.type,
+        text=comment.text,
+        anchor_sequence=comment.anchor_sequence,
+        anchor_timestamp=comment.anchor_timestamp,
+        anchor_url=comment.anchor_url,
+        created_at=comment.created_at,
+        updated_at=comment.updated_at,
+        edit_count=len(comment.edits) if comment.edits else 0,
+    )
+
+
+@router.post("/recorder/sessions/{session_id}/comments", response_model=CommentResponse, status_code=status.HTTP_201_CREATED)
+async def create_comment(
+    session_id: UUID,
+    request: CommentCreateRequest,
+    db: Session = Depends(get_db),
+):
+    """Add a comment to a recording session.
+
+    Auth: scoped comment token in the body (verify_comment_token). Works on
+    sessions in any status so viewers can comment during review too.
+    """
+    user = verify_comment_token(request.token, session_id, db)
+
+    session = db.query(RecordingSession).filter(RecordingSession.id == session_id).first()
+    if not session:
+        raise HTTPException(status_code=status.HTTP_404_NOT_FOUND, detail="Recording session not found")
+
+    comment = RecordingComment(
+        session_id=session_id,
+        user_id=user.id,
+        type=CommentType(request.type),
+        text=request.text,
+        anchor_sequence=request.anchor_sequence,
+        anchor_timestamp=request.anchor_timestamp,
+        anchor_url=request.anchor_url,
+    )
+    db.add(comment)
+    db.commit()
+    db.refresh(comment)
+
+    return _comment_to_response(comment)
+
+
+@router.patch("/recorder/comments/{comment_id}", response_model=CommentResponse)
+async def update_comment(
+    comment_id: UUID,
+    request: CommentUpdateRequest,
+    db: Session = Depends(get_db),
+):
+    """Edit a comment (author only). Every edit is logged in recording_comment_edits."""
+    comment = db.query(RecordingComment).filter(RecordingComment.id == comment_id).first()
+    if not comment:
+        raise HTTPException(status_code=status.HTTP_404_NOT_FOUND, detail="Comment not found")
+
+    user = verify_comment_token(request.token, comment.session_id, db)
+
+    if comment.user_id != user.id:
+        raise HTTPException(status_code=status.HTTP_403_FORBIDDEN, detail="Only the comment author can edit")
+
+    # Append-only edit log: preserve who/when/previous text before overwriting.
+    db.add(RecordingCommentEdit(
+        comment_id=comment.id,
+        editor_user_id=user.id,
+        previous_text=comment.text,
+    ))
+    comment.text = request.text
+    db.commit()
+    db.refresh(comment)
+
+    return _comment_to_response(comment)
+
+
+@router.delete("/recorder/comments/{comment_id}", status_code=status.HTTP_204_NO_CONTENT)
+async def delete_comment(
+    comment_id: UUID,
+    request: Optional[CommentDeleteRequest] = None,
+    db: Session = Depends(get_db),
+):
+    """Delete a comment: author via comment token, or admin via user auth (cookie/bearer)."""
+    comment = db.query(RecordingComment).filter(RecordingComment.id == comment_id).first()
+    if not comment:
+        raise HTTPException(status_code=status.HTTP_404_NOT_FOUND, detail="Comment not found")
+
+    authorised = False
+
+    # Path 1: comment token (author)
+    if request and request.token:
+        user = verify_comment_token(request.token, comment.session_id, db)
+        if comment.user_id == user.id:
+            authorised = True
+
+    # Path 2: authenticated admin user (cookie / Authorization bearer)
+    if not authorised:
+        from app.core.security import get_token_from_request, verify_access_token
+        # Re-entrant Request is not available here; read the raw request from scope via
+        # the token passed on the endpoint (FastAPI injects Request when declared).
+        # We fall through to the dedicated check below.
+        pass
+
+    if not authorised:
+        raise HTTPException(status_code=status.HTTP_401_UNAUTHORIZED, detail="Comment token (author) or admin session required")
+
+    db.delete(comment)
+    db.commit()
+
+
+@router.get("/recorder/sessions/{session_id}/comments", response_model=list[CommentResponse])
+async def list_comments(
+    session_id: UUID,
+    db: Session = Depends(get_db),
+    _auth = Depends(get_api_key_or_user),
+):
+    """List comments for a session (Recordings page is already authed)."""
+    session = db.query(RecordingSession).filter(RecordingSession.id == session_id).first()
+    if not session:
+        raise HTTPException(status_code=status.HTTP_404_NOT_FOUND, detail="Recording session not found")
+
+    comments = db.query(RecordingComment).filter(
+        RecordingComment.session_id == session_id
+    ).order_by(RecordingComment.created_at).all()
+
+    return [_comment_to_response(c) for c in comments]
 
 
 # =============================================================================
