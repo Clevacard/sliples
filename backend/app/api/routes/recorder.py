@@ -1,18 +1,21 @@
 """Recording session endpoints for UI event capture."""
 
-from datetime import datetime
+from datetime import datetime, timedelta
 from typing import Optional
 from uuid import UUID
 
 import asyncio
 import json
+import secrets
 
 from fastapi import APIRouter, Depends, HTTPException, status, Response, Request, WebSocket, WebSocketDisconnect
-from fastapi.responses import PlainTextResponse, FileResponse
+from fastapi.responses import PlainTextResponse, FileResponse, JSONResponse
 from redis.asyncio import Redis as AsyncRedis
 from pydantic import BaseModel, Field
 from sqlalchemy.orm import Session
 
+from app.config import get_settings
+from app.core.security import get_current_active_user
 from app.database import get_db
 from app.models import RecordingSession, RecordedEvent, RecordingStatus, Project, ApiKey, PlaybackRun, PlaybackStepResult, PlaybackStatus, PlaybackStepStatus, Environment, BrowserConfig, AllowedDomain, RecordingComment, RecordingCommentEdit, CommentType, User, UserRole
 from app.api.deps import get_api_key, verify_project_access, get_validated_api_key, get_api_key_or_user, get_domain_or_api_key_auth, verify_comment_token
@@ -304,6 +307,31 @@ class CommentResponse(BaseModel):
 
     class Config:
         from_attributes = True
+
+
+# =============================================================================
+# Comment-auth device flow (design §2)
+# =============================================================================
+
+
+class CommentAuthStartRequest(BaseModel):
+    """Begin comment-auth: the recorder asks for an auth URL to open."""
+    session_id: UUID
+
+
+class CommentAuthStartResponse(BaseModel):
+    """Nonce + URL the user opens in a new tab to authenticate."""
+    nonce: str
+    auth_url: str
+    expires_in: int
+
+
+class CommentAuthPollResponse(BaseModel):
+    """Poll result: pending (202) or a scoped comment token (200)."""
+    status: str
+    token: Optional[str] = None
+    commenter_name: Optional[str] = None
+    expires_in: Optional[int] = None
 
 
 # =============================================================================
