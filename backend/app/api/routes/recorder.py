@@ -869,6 +869,158 @@ async def list_comments(
 
 
 # =============================================================================
+# Comment-auth device flow (design §2)
+#
+# The recorder opens {auth_url} in a new tab where the user authenticates
+# (cookie). Complete marks the nonce; the recorder polls the nonce endpoint and
+# receives a short-lived scoped comment JWT (scope=comment, sid=session_id).
+# Mirrors the CLI device flow (auth.py). The comment token travels in request
+# bodies so the recorder's ACAO:* CORS / sendBeacon stay usable; it is never
+# logged.
+# =============================================================================
+
+_COMMENT_AUTH_TTL_S = 180          # nonce lifetime
+_COMMENT_TOKEN_TTL_S = 4 * 3600    # scoped comment token lifetime
+_COMMENT_AUTH_RL_LIMIT = 10        # start requests per window
+_COMMENT_AUTH_RL_WINDOW_S = 60
+
+
+def _comment_auth_redis():
+    """Sync Redis client for the nonce store (same pattern as auth.py CLI flow)."""
+    import redis as _redis
+    return _redis.from_url(get_settings().redis_url)
+
+
+@router.post(
+    "/recorder/comment-auth/start",
+    response_model=CommentAuthStartResponse,
+    status_code=status.HTTP_201_CREATED,
+)
+async def comment_auth_start(
+    request: CommentAuthStartRequest,
+    raw_request: Request = None,
+    db: Session = Depends(get_db),
+):
+    """Start comment-auth: return a nonce and the URL to open in a new tab.
+
+    Unauthenticated (the viewer has no session yet). Rate-limited per
+    session+IP to blunt nonce farming. The session must exist.
+    """
+    session = db.query(RecordingSession).filter(RecordingSession.id == request.session_id).first()
+    if not session:
+        raise HTTPException(status_code=status.HTTP_404_NOT_FOUND, detail="Recording session not found")
+
+    client_ip = raw_request.client.host if raw_request and raw_request.client else "unknown"
+    rl_key = f"sliples:comment_auth_rl:{request.session_id}:{client_ip}"
+
+    _r = _comment_auth_redis()
+    try:
+        attempts = _r.incr(rl_key)
+        if attempts == 1:
+            _r.expire(rl_key, _COMMENT_AUTH_RL_WINDOW_S)
+        if attempts > _COMMENT_AUTH_RL_LIMIT:
+            raise HTTPException(
+                status_code=status.HTTP_429_TOO_MANY_REQUESTS,
+                detail="Too many comment-auth starts; try again shortly",
+            )
+
+        nonce = secrets.token_urlsafe(32)
+        _r.set(
+            f"sliples:comment_auth:{nonce}",
+            json.dumps({"status": "pending", "session_id": str(request.session_id)}),
+            ex=_COMMENT_AUTH_TTL_S,
+        )
+    finally:
+        _r.close()
+
+    auth_url = f"{get_settings().frontend_url}/comment-auth/{nonce}"
+    return CommentAuthStartResponse(nonce=nonce, auth_url=auth_url, expires_in=_COMMENT_AUTH_TTL_S)
+
+
+@router.post("/recorder/comment-auth/{nonce}/complete")
+async def comment_auth_complete(
+    nonce: str,
+    current_user: User = Depends(get_current_active_user),
+):
+    """Mark a nonce as authenticated by the signed-in user (cookie auth).
+
+    Any active user may comment; no project/workspace membership check (decided).
+    """
+    _r = _comment_auth_redis()
+    try:
+        key = f"sliples:comment_auth:{nonce}"
+        raw = _r.get(key)
+        if raw is None:
+            raise HTTPException(status_code=status.HTTP_404_NOT_FOUND, detail="Comment-auth not found or expired")
+        data = json.loads(raw)
+        if data.get("status") != "pending":
+            raise HTTPException(status_code=status.HTTP_409_CONFLICT, detail="Comment-auth already completed")
+        data["status"] = "complete"
+        data["user_id"] = str(current_user.id)
+        data["user_name"] = current_user.name
+        _r.set(key, json.dumps(data), ex=_COMMENT_AUTH_TTL_S)
+    finally:
+        _r.close()
+
+    return {"status": "complete"}
+
+
+@router.get("/recorder/comment-auth/{nonce}", response_model=CommentAuthPollResponse)
+async def comment_auth_poll(nonce: str, db: Session = Depends(get_db)):
+    """Poll for a scoped comment token after the user completes auth.
+
+    202 while pending, 200 with a 4h scoped comment JWT when complete, 404 if
+    the nonce expired. The nonce is single-use: deleted once the token is minted.
+    The token is returned to the caller and never logged.
+    """
+    _r = _comment_auth_redis()
+    try:
+        key = f"sliples:comment_auth:{nonce}"
+        raw = _r.get(key)
+        if raw is None:
+            raise HTTPException(status_code=status.HTTP_404_NOT_FOUND, detail="Comment-auth not found or expired")
+        data = json.loads(raw)
+        if data.get("status") != "complete":
+            return JSONResponse(status_code=202, content={"status": "pending"})
+        # Single-use: consume the nonce before minting.
+        _r.delete(key)
+    finally:
+        _r.close()
+
+    user_id = data.get("user_id")
+    try:
+        user_uuid = UUID(user_id)
+    except (ValueError, TypeError, AttributeError):
+        raise HTTPException(status_code=status.HTTP_401_UNAUTHORIZED, detail="Comment-auth user invalid")
+    user = db.query(User).filter(User.id == user_uuid).first()
+    if not user or not user.is_active:
+        raise HTTPException(status_code=status.HTTP_401_UNAUTHORIZED, detail="Comment-auth user inactive")
+
+    settings = get_settings()
+    from jose import jwt as _jwt
+    now = datetime.utcnow()
+    token = _jwt.encode(
+        {
+            "sub": str(user.id),
+            "email": user.email,
+            "scope": "comment",
+            "sid": data.get("session_id"),
+            "iat": now,
+            "exp": now + timedelta(seconds=_COMMENT_TOKEN_TTL_S),
+        },
+        settings.jwt_secret_key,
+        algorithm=settings.jwt_algorithm,
+    )
+
+    return CommentAuthPollResponse(
+        status="complete",
+        token=token,
+        commenter_name=user.name,
+        expires_in=_COMMENT_TOKEN_TTL_S,
+    )
+
+
+# =============================================================================
 # Session Export (AI-optimized format)
 # =============================================================================
 
