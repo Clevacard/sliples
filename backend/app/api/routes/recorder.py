@@ -779,6 +779,7 @@ async def update_comment(
 @router.delete("/recorder/comments/{comment_id}", status_code=status.HTTP_204_NO_CONTENT)
 async def delete_comment(
     comment_id: UUID,
+    raw_request: Request = None,
     request: Optional[CommentDeleteRequest] = None,
     db: Session = Depends(get_db),
 ):
@@ -796,12 +797,15 @@ async def delete_comment(
             authorised = True
 
     # Path 2: authenticated admin user (cookie / Authorization bearer)
-    if not authorised:
+    if not authorised and raw_request is not None:
         from app.core.security import get_token_from_request, verify_access_token
-        # Re-entrant Request is not available here; read the raw request from scope via
-        # the token passed on the endpoint (FastAPI injects Request when declared).
-        # We fall through to the dedicated check below.
-        pass
+        token = get_token_from_request(raw_request)
+        if token:
+            token_data = verify_access_token(token)
+            if token_data:
+                admin_user = db.query(User).filter(User.id == token_data.user_id).first()
+                if admin_user and admin_user.is_active and admin_user.role == UserRole.admin:
+                    authorised = True
 
     if not authorised:
         raise HTTPException(status_code=status.HTTP_401_UNAUTHORIZED, detail="Comment token (author) or admin session required")
