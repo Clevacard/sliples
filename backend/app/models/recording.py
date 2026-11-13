@@ -40,6 +40,7 @@ class RecordingSession(Base):
     # Relationships
     project = relationship("Project", back_populates="recording_sessions")
     events = relationship("RecordedEvent", back_populates="session", cascade="all, delete-orphan", order_by="RecordedEvent.sequence")
+    comments = relationship("RecordingComment", back_populates="session", cascade="all, delete-orphan", order_by="RecordingComment.created_at")
 
 
 class RecordedEvent(Base):

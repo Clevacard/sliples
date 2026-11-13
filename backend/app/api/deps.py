@@ -4,11 +4,66 @@ from typing import Optional, Union
 from uuid import UUID
 
 from fastapi import Header, HTTPException, status, Depends, Request, Query
+from jose import JWTError, jwt
 from sqlalchemy.orm import Session
 import bcrypt
 
+from app.config import get_settings
 from app.database import get_db
 from app.models import ApiKey, User, Project, ProjectMember, ProjectRole, UserRole, AllowedDomain
+
+
+def verify_comment_token(
+    token: str,
+    session_id: UUID,
+    db: Session,
+) -> User:
+    """
+    Verify a scoped comment token (JWT with scope="comment", sid=session_id).
+
+    Comment tokens are minted by the comment-auth flow (design §2) and carried
+    in the request BODY (no custom headers, so the recorder's ACAO:* CORS
+    suffices). This is a plain helper, not a FastAPI dependency, because the
+    token arrives inside a pydantic body rather than a header/cookie.
+
+    Raises 401 on any validation failure; never logs the token value.
+    """
+    credentials_exception = HTTPException(
+        status_code=status.HTTP_401_UNAUTHORIZED,
+        detail="Invalid or expired comment token",
+    )
+    if not token:
+        raise credentials_exception
+
+    settings = get_settings()
+    try:
+        payload = jwt.decode(
+            token,
+            settings.jwt_secret_key,
+            algorithms=[settings.jwt_algorithm],
+            options={"require": ["exp", "sub"]},
+        )
+    except JWTError:
+        raise credentials_exception
+
+    if payload.get("scope") != "comment":
+        raise credentials_exception
+
+    sid = payload.get("sid")
+    if not sid or sid != str(session_id):
+        raise credentials_exception
+
+    user_id = payload.get("sub")
+    try:
+        user_uuid = UUID(user_id)
+    except (ValueError, TypeError, AttributeError):
+        raise credentials_exception
+
+    user = db.query(User).filter(User.id == user_uuid).first()
+    if not user or not user.is_active:
+        raise credentials_exception
+
+    return user
 
 
 async def get_api_key(
