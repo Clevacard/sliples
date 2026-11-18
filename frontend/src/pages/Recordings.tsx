@@ -205,6 +205,7 @@ export default function Recordings() {
                     <th className="text-left px-4 py-3 text-gray-300 font-medium">URL</th>
                     <th className="text-left px-4 py-3 text-gray-300 font-medium">Status</th>
                     <th className="text-left px-4 py-3 text-gray-300 font-medium">Events</th>
+                    <th className="text-left px-4 py-3 text-gray-300 font-medium">Comments</th>
                     <th className="text-left px-4 py-3 text-gray-300 font-medium">Created</th>
                     <th className="text-right px-4 py-3 text-gray-300 font-medium">Actions</th>
                   </tr>
@@ -226,6 +227,15 @@ export default function Recordings() {
                         <span className={`badge ${getStatusBadgeClass(session.status)}`}>{session.status}</span>
                       </td>
                       <td className="px-4 py-3 text-gray-100">{session.event_count}</td>
+                      <td className="px-4 py-3">
+                        {session.comment_count ? (
+                          <span className="badge badge-info" title={`${session.comment_count} comment${session.comment_count !== 1 ? 's' : ''}`}>
+                            {session.comment_count}
+                          </span>
+                        ) : (
+                          <span className="text-gray-500">—</span>
+                        )}
+                      </td>
                       <td className="px-4 py-3 text-gray-400 text-sm">{formatDate(session.created_at)}</td>
                       <td className="px-4 py-3 text-right space-x-2">
                         <Link
