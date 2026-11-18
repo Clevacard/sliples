@@ -21,7 +21,7 @@ import { usePlaybackWebSocket, PlaybackStepResult } from '../hooks'
 export default function RecordingDetails() {
   const { id } = useParams<{ id: string }>()
   const navigate = useNavigate()
-  const { currentSession, events, isLoading, error, fetchSessionDetails } = useRecordingsStore()
+  const { currentSession, events, comments, isLoading, error, fetchSessionDetails } = useRecordingsStore()
   const [expandedEventId, setExpandedEventId] = useState<string | null>(null)
   const [editingEvent, setEditingEvent] = useState<RecordedEvent | null>(null)
 
@@ -248,6 +248,19 @@ export default function RecordingDetails() {
         return 'bg-red-700 text-red-100'
       case 'network_error':
         return 'bg-orange-700 text-orange-100'
+      default:
+        return 'badge'
+    }
+  }
+
+  const getCommentTypeBadgeClass = (type: string) => {
+    switch (type) {
+      case 'bug':
+        return 'badge-error'
+      case 'issue':
+        return 'badge-warning'
+      case 'improvement':
+        return 'badge-info'
       default:
         return 'badge'
     }
@@ -545,6 +558,41 @@ export default function RecordingDetails() {
           </table>
         </div>
       )}
+
+      {/* Comments */}
+      <div className="card">
+        <h2 className="text-xl font-semibold text-white mb-4">
+          Comments <span className="text-sm text-gray-400 font-normal">({comments.length})</span>
+        </h2>
+        {comments.length > 0 ? (
+          <ul className="space-y-4">
+            {comments.map((comment) => (
+              <li key={comment.id} className="border-b border-gray-700 last:border-0 pb-4 last:pb-0">
+                <div className="flex items-center gap-2 mb-1 flex-wrap">
+                  <span className={getCommentTypeBadgeClass(comment.type)}>{comment.type}</span>
+                  <span className="text-sm text-gray-300">{comment.author_name || comment.author_email || 'Unknown'}</span>
+                  <span className="text-xs text-gray-500">{formatDate(comment.created_at)}</span>
+                  {comment.edit_count > 0 && (
+                    <span className="text-xs text-gray-500 italic">edited ({comment.edit_count})</span>
+                  )}
+                </div>
+                <p className="text-sm text-gray-200 whitespace-pre-wrap">{comment.text}</p>
+                {(comment.anchor_sequence != null || comment.anchor_timestamp || comment.anchor_url) && (
+                  <div className="text-xs text-gray-500 mt-1">
+                    {comment.anchor_sequence != null && <span>event #{comment.anchor_sequence}</span>}
+                    {comment.anchor_timestamp && <span>{comment.anchor_sequence != null ? ' \u00b7 ' : ''}{formatDate(comment.anchor_timestamp)}</span>}
+                    {comment.anchor_url && (
+                      <span>{(comment.anchor_sequence != null || comment.anchor_timestamp) ? ' \u00b7 ' : ''}{comment.anchor_url}</span>
+                    )}
+                  </div>
+                )}
+              </li>
+            ))}
+          </ul>
+        ) : (
+          <p className="text-gray-400">No comments yet</p>
+        )}
+      </div>
 
       {/* Events Table (Compact) */}
       <div className="card">
