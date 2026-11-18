@@ -23,6 +23,7 @@ import AdminRoute from './components/AdminRoute'
 import Recordings from './pages/Recordings'
 import RecordingDetails from './pages/RecordingDetails'
 import CliSuccess from './pages/CliSuccess'
+import CommentAuth from './pages/CommentAuth'
 
 function App() {
   return (
@@ -31,6 +32,7 @@ function App() {
       <Route path="/login" element={<Login />} />
       <Route path="/auth/callback" element={<AuthCallback />} />
       <Route path="/auth/cli-success" element={<CliSuccess />} />
+      <Route path="/comment-auth/:nonce" element={<CommentAuth />} />
 
       {/* Protected routes */}
       <Route
