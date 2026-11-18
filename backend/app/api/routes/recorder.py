@@ -882,6 +882,39 @@ async def list_comments(
     return [_comment_to_response(c) for c in comments]
 
 
+@router.get("/recorder/comments/{comment_id}/edits", response_model=list[CommentEditResponse])
+async def list_comment_edits(
+    comment_id: UUID,
+    db: Session = Depends(get_db),
+    _auth = Depends(get_api_key_or_user),
+):
+    """List the edit history of a comment (Recordings page is already authed).
+
+    Returns the append-only recording_comment_edits rows (who, when, previous
+    text) ordered oldest-first so the UI can render the change history.
+    """
+    comment = db.query(RecordingComment).filter(RecordingComment.id == comment_id).first()
+    if not comment:
+        raise HTTPException(status_code=status.HTTP_404_NOT_FOUND, detail="Comment not found")
+
+    edits = db.query(RecordingCommentEdit).filter(
+        RecordingCommentEdit.comment_id == comment_id
+    ).order_by(RecordingCommentEdit.created_at).all()
+
+    return [
+        CommentEditResponse(
+            id=e.id,
+            comment_id=e.comment_id,
+            editor_user_id=e.editor_user_id,
+            editor_name=e.editor.name if e.editor else None,
+            editor_email=e.editor.email if e.editor else None,
+            previous_text=e.previous_text,
+            created_at=e.created_at,
+        )
+        for e in edits
+    ]
+
+
 # =============================================================================
 # Comment-auth device flow (design §2)
 #
