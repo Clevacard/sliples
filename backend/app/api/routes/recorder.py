@@ -309,6 +309,20 @@ class CommentResponse(BaseModel):
         from_attributes = True
 
 
+class CommentEditResponse(BaseModel):
+    """One entry in a comment's append-only edit history (who, when, previous text)."""
+    id: UUID
+    comment_id: UUID
+    editor_user_id: UUID
+    editor_name: Optional[str] = None
+    editor_email: Optional[str] = None
+    previous_text: str
+    created_at: datetime
+
+    class Config:
+        from_attributes = True
+
+
 # =============================================================================
 # Comment-auth device flow (design §2)
 # =============================================================================
