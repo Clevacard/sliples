@@ -1633,6 +1633,13 @@ async def get_recorder_snippet(
     isRecording: false,
     flushInterval: null,
     lastEventTime: null,
+    // Recorder user comments (design #248): scoped comment token + cached name,
+    // comment-auth orchestration state, and the Shadow-DOM comment UI.
+    commentToken: null,
+    commenterName: null,
+    _commentAuthNonce: null,
+    _commentAuthPollTimer: null,
+    _commentUI: null,
 
     getHeaders: function() {{
       const h = {{'Content-Type': 'application/json'}};
@@ -1802,6 +1809,94 @@ async def get_recorder_snippet(
       if (['Enter', 'Tab', 'Escape', 'Backspace', 'Delete'].includes(e.key) || e.ctrlKey || e.metaKey) {{
         this.record('keydown', e.target, {{ key_info: {{ key: e.key, code: e.code, ctrl: e.ctrlKey, alt: e.altKey, shift: e.shiftKey, meta: e.metaKey }} }});
       }}
+    }},
+
+    // --- Recorder user comments (design #248) ---
+    // Hotkey Ctrl+Shift+Y: opens the comment-auth tab on Sliples (original window
+    // is not navigated away), then polls for a scoped comment token. Works on
+    // Windows, Linux and macOS because it uses Ctrl (not Cmd/metaKey).
+    handleCommentHotkey: function(e) {{
+      if (!(e.ctrlKey && e.shiftKey && (e.key || '').toLowerCase() === 'y')) return;
+      e.preventDefault();
+      this.beginCommentAuth();
+    }},
+
+    // Kick off comment-auth: ask the backend for a nonce + auth_url, open it in a
+    // new tab, and start polling. If we already hold a usable token just show the UI.
+    beginCommentAuth: function() {{
+      if (this.commentToken) {{ this.showCommentIcon(); return; }}
+      if (this._commentAuthNonce) return; // an auth flow is already in flight
+      const self = this;
+      if (!this.sessionId) return;
+      fetch(CONFIG.endpoint + '/recorder/comment-auth/start', {{
+        method: 'POST',
+        headers: {{ 'Content-Type': 'application/json' }},
+        body: JSON.stringify({{ session_id: this.sessionId }}),
+      }})
+        .then(function(r) {{ if (!r.ok) throw new Error('start failed: ' + r.status); return r.json(); }})
+        .then(function(data) {{
+          self._commentAuthNonce = data.nonce;
+          window.open(data.auth_url, '_blank', 'noopener');
+          self._pollCommentAuth(data.nonce, (data.expires_in || 180) * 1000);
+        }})
+        .catch(function(e) {{ console.error('[Sliples] comment-auth start failed:', e); }});
+    }},
+
+    _pollCommentAuth: function(nonce, ttlMs) {{
+      const self = this;
+      const deadline = Date.now() + ttlMs;
+      const tick = function() {{
+        if (Date.now() > deadline) {{ self._commentAuthNonce = null; return; }}
+        fetch(CONFIG.endpoint + '/recorder/comment-auth/' + nonce)
+          .then(function(r) {{
+            if (r.status === 202) {{ self._commentAuthPollTimer = setTimeout(tick, 2000); return; }}
+            if (r.status === 404) {{ self._commentAuthNonce = null; return; }}
+            if (!r.ok) throw new Error('poll failed: ' + r.status);
+            return r.json().then(function(d) {{
+              self._commentAuthNonce = null;
+              self._setCommentToken(d.token, d.commenter_name, d.expires_in);
+            }});
+          }})
+          .catch(function(e) {{
+            console.error('[Sliples] comment-auth poll failed:', e);
+            self._commentAuthNonce = null;
+          }});
+      }};
+      tick();
+    }},
+
+    _setCommentToken: function(token, name, expiresIn) {{
+      if (!token) return;
+      this.commentToken = token;
+      if (name) this.commenterName = name;
+      try {{
+        localStorage.setItem('_sliples_comment_token', token);
+        localStorage.setItem('_sliples_comment_token_exp', String(Date.now() + (expiresIn || 14400) * 1000));
+        if (name) localStorage.setItem('_sliples_commenter_name', name);
+      }} catch (e) {{}}
+      this.showCommentIcon();
+    }},
+
+    // Adopt a cached token from a previous page (same session) if it is still valid.
+    _restoreCommentToken: function() {{
+      try {{
+        const token = localStorage.getItem('_sliples_comment_token');
+        const exp = parseInt(localStorage.getItem('_sliples_comment_token_exp') || '0', 10);
+        if (token && exp && Date.now() < exp) {{
+          this.commentToken = token;
+          this.commenterName = localStorage.getItem('_sliples_commenter_name') || this.commenterName;
+        }} else if (token) {{
+          this._clearCommentToken();
+        }}
+      }} catch (e) {{}}
+    }},
+
+    _clearCommentToken: function() {{
+      this.commentToken = null;
+      try {{
+        localStorage.removeItem('_sliples_comment_token');
+        localStorage.removeItem('_sliples_comment_token_exp');
+      }} catch (e) {{}}
     }},
 
     // JS error and network error capture
