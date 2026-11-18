@@ -1899,6 +1899,79 @@ async def get_recorder_snippet(
       }} catch (e) {{}}
     }},
 
+    // Show the lower-left comment icon (Shadow-DOM overlay, isolated from host CSS).
+    showCommentIcon: function() {{
+      if (!this.commentToken) return;
+      if (this._commentUI) {{ this._commentUI.icon.style.display = 'flex'; return; }}
+      const self = this;
+      const host = document.createElement('div');
+      host.id = '__sliples_comment_host';
+      document.body.appendChild(host);
+      const root = host.attachShadow({{ mode: 'open' }});
+      root.innerHTML = '' +
+        '<style>' +
+        ':host{{all:initial}}' +
+        '#icon{{position:fixed;bottom:16px;left:16px;z-index:2147483647;width:44px;height:44px;border-radius:50%;background:#2563eb;color:#fff;display:flex;align-items:center;justify-content:center;cursor:pointer;box-shadow:0 2px 8px rgba(0,0,0,.3);font-size:22px;line-height:1;border:none}}' +
+        '#panel{{position:fixed;bottom:70px;left:16px;z-index:2147483647;width:280px;background:#fff;border:1px solid #d1d5db;border-radius:8px;box-shadow:0 4px 16px rgba(0,0,0,.2);padding:12px;display:none;font-family:system-ui,sans-serif}}' +
+        '#panel.open{{display:block}}' +
+        'label{{display:block;font-size:12px;margin:8px 0 4px;color:#374151}}' +
+        'select,textarea{{width:100%;box-sizing:border-box;font-size:13px;padding:6px;border:1px solid #d1d5db;border-radius:4px}}' +
+        'textarea{{min-height:70px;resize:vertical}}' +
+        '#as{{font-size:11px;color:#6b7280;margin-bottom:4px}}' +
+        '#row{{display:flex;gap:8px;margin-top:10px}}' +
+        'button{{flex:1;padding:8px;font-size:13px;border-radius:4px;border:1px solid transparent;cursor:pointer}}' +
+        '#save{{background:#2563eb;color:#fff}}' +
+        '#cancel{{background:#f3f4f6;color:#374151}}' +
+        '</style>' +
+        '<button id="icon" title="Add a comment (Ctrl+Shift+Y)" aria-label="Add a comment">&#128172;</button>' +
+        '<div id="panel" role="dialog" aria-label="Add a comment">' +
+        '<div id="as"></div>' +
+        '<label for="type">Type</label>' +
+        '<select id="type"><option value="bug">bug</option><option value="issue">issue</option><option value="improvement">improvement</option></select>' +
+        '<label for="text">Comment</label>' +
+        '<textarea id="text" placeholder="Describe the bug, issue or improvement"></textarea>' +
+        '<div id="row"><button id="cancel">Cancel</button><button id="save">Save</button></div>' +
+        '</div>';
+      const icon = root.getElementById('icon');
+      const panel = root.getElementById('panel');
+      const asEl = root.getElementById('as');
+      const typeEl = root.getElementById('type');
+      const textEl = root.getElementById('text');
+      asEl.textContent = this.commenterName ? ('Commenting as ' + this.commenterName) : '';
+      icon.addEventListener('click', function() {{ panel.classList.toggle('open'); }});
+      root.getElementById('cancel').addEventListener('click', function() {{ panel.classList.remove('open'); }});
+      root.getElementById('save').addEventListener('click', function() {{
+        self.submitComment(typeEl.value, textEl.value);
+        textEl.value = '';
+        panel.classList.remove('open');
+      }});
+      this._commentUI = {{ host: host, icon: icon, panel: panel }};
+    }},
+
+    // Capture the journey anchor and POST the comment immediately (keepalive so it
+    // survives navigation). Token travels in the body -> no custom headers -> ACAO:*.
+    submitComment: function(type, text) {{
+      if (!this.commentToken || !this.sessionId || !text) return;
+      const body = JSON.stringify({{
+        token: this.commentToken,
+        type: type,
+        text: text,
+        anchor_sequence: this.sequence - 1,
+        anchor_timestamp: new Date().toISOString(),
+        anchor_url: window.location.href,
+      }});
+      try {{
+        fetch(CONFIG.endpoint + '/recorder/sessions/' + this.sessionId + '/comments', {{
+          method: 'POST',
+          headers: {{ 'Content-Type': 'application/json' }},
+          body: body,
+          keepalive: true,
+        }}).catch(function(e) {{ console.error('[Sliples] comment send failed:', e); }});
+      }} catch (e) {{
+        console.error('[Sliples] comment send failed:', e);
+      }}
+    }},
+
     // JS error and network error capture
     setupErrorCapture: function() {{
       // JS exceptions
@@ -2113,6 +2186,13 @@ async def get_recorder_snippet(
       this._handleSubmit = this.handleSubmit.bind(this);
       this._handleKeydown = this.handleKeydown.bind(this);
       this._boundSubmit = this._handleSubmit;
+      this._handleCommentHotkey = this.handleCommentHotkey.bind(this);
+      // Comment hotkey is bound at init (not gated on recording) so it is ready
+      // as soon as the recorder is; beginCommentAuth() itself needs a sessionId.
+      document.addEventListener('keydown', this._handleCommentHotkey, true);
+      // Restore a cached comment token from a previous page of the same session.
+      this._restoreCommentToken();
+      if (this.commentToken) this.showCommentIcon();
 
       // Optional embed config: merge into CONFIG and adopt the given session.
       // Called with no arguments (e.g. the bootstrap below) this is a no-op and
