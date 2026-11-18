@@ -991,6 +991,7 @@ export interface RecordingSession {
   created_at: string
   stopped_at?: string
   event_count: number
+  comment_count?: number
 }
 
 export interface AllowedDomain {
@@ -1033,6 +1034,22 @@ export interface RecordedEvent {
   notes?: string
 }
 
+export interface RecordingComment {
+  id: string
+  session_id: string
+  user_id: string
+  author_name?: string
+  author_email?: string
+  type: 'bug' | 'issue' | 'improvement'
+  text: string
+  anchor_sequence?: number
+  anchor_timestamp?: string
+  anchor_url?: string
+  created_at: string
+  updated_at: string
+  edit_count: number
+}
+
 export interface EventMetadataUpdate {
   step_label?: string
   should_screenshot?: boolean
@@ -1052,6 +1069,11 @@ export async function getRecordingSession(sessionId: string): Promise<RecordingS
 
 export async function getRecordingEvents(sessionId: string): Promise<RecordedEvent[]> {
   const response = await api.get(`/recorder/sessions/${sessionId}/events`)
+  return response.data
+}
+
+export async function getRecordingComments(sessionId: string): Promise<RecordingComment[]> {
+  const response = await api.get(`/recorder/sessions/${sessionId}/comments`)
   return response.data
 }
 
